@@ -484,3 +484,57 @@ class TestProbeReadsRealFiles:
         source = _need(media, "p7_ff.hevc")
         meta = Hdr10PlusTool(toolbox).extract(source, tmp_path / "meta.json")
         assert read_json(meta).frames == 1000
+
+
+class TestFullEnhancementLayer:
+    """A real FEL remux, which the library turned out to contain five of.
+
+    Set HIBRIT_FEL to one of them to run these. Not part of the documented
+    fixture set because it is a 60 GB film rather than a clip — but converting
+    FEL to 8.1 discards a genuine enhancement layer, and that path had never
+    been near a file that has one.
+    """
+
+    @pytest.fixture
+    def fel_source(self) -> Path:
+        import os
+
+        configured = os.environ.get("HIBRIT_FEL")
+        if not configured:
+            pytest.skip("set HIBRIT_FEL to a profile 7 FEL remux")
+        path = Path(configured)
+        if not path.exists():
+            pytest.skip(f"{path} not present")
+        return path
+
+    def test_it_really_is_fel(self, fel_source: Path, toolbox, tmp_path: Path) -> None:
+        dovi = DoviTool(toolbox)
+        toolbox.run(
+            "dovi_tool",
+            ["extract-rpu", "-l", "400", str(fel_source), "-o", str(tmp_path / "fel.bin")],
+        )
+        info = dovi.info(tmp_path / "fel.bin")
+        assert info.profile == 7
+        assert info.is_fel, "HIBRIT_FEL points at a MEL file"
+
+    def test_converting_it_to_81_is_reported_as_a_loss(self, fel_source: Path, toolbox) -> None:
+        """The planner's wording for FEL differs from its wording for MEL, and
+        this is the case where the difference is real."""
+        from conftest import make_info
+
+        from hibrit.planner import build_plan
+
+        source = probe(fel_source, toolbox)
+        assert source.is_dual_layer
+
+        target = make_info(
+            "target.mkv",
+            frames=source.frame_count,
+            rate=source.frame_rate,
+            width=source.width,
+            height=source.height,
+        )
+        plan = build_plan(source, target)
+        assert plan.convert_mode == 2
+        text = " ".join(n.text for n in plan.notes)
+        assert "enhancement layer's luma and chroma mapping is discarded" in text
