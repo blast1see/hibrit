@@ -201,7 +201,8 @@ dual-layer structure as dual-layer.
 pytest -q -m "not tools and not real"   # logic only; no binaries, no media
 pytest -q -m tools                      # real binaries, synthesised material
 pytest -q -m real                       # real clips; set HIBRIT_MEDIA
-pytest -q                               # all three
+pytest -q -m gui                        # drives the window; needs a display
+pytest -q                               # everything but the window
 ```
 
 The `tools` tier needs no media: `dovi_tool generate` writes an RPU from a JSON

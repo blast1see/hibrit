@@ -33,7 +33,10 @@ packages = ["hibrit"]
 
 [tool.pytest.ini_options]
 minversion = "8.3"
-addopts = "-ra --strict-markers"
+# The window tests are out of the default run: they open a real Tk window, and
+# a machine without a display would report them as failures rather than as
+# something it could not attempt. `pytest -m gui` asks for them explicitly.
+addopts = "-ra --strict-markers -m 'not gui'"
 testpaths = ["tests"]
 markers = [
     "tools: requires dovi_tool / hdr10plus_tool / ffmpeg binaries",
