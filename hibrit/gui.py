@@ -303,11 +303,18 @@ class App(ttk.Frame):
         if self.source_info is None or self.target_info is None:
             return
         self.align_button["state"] = "disabled"
-        self.alignment_text.set("measuring — this decodes a few minutes of both files…")
+        # Measured on a 223,615-frame remux: four and a half minutes. Saying so
+        # is the difference between waiting and wondering.
+        self.alignment_text.set("measuring — on a feature this takes a few minutes…")
 
         def work() -> None:
             try:
-                result = align(self.source_info, self.target_info, self.box)
+                result = align(
+                    self.source_info,
+                    self.target_info,
+                    self.box,
+                    progress=lambda message: self.messages.put(("log", message)),
+                )
             except Exception as error:
                 self.messages.put(("align-error", error))
             else:

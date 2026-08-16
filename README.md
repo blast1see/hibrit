@@ -58,9 +58,13 @@ then inject.
 Finding the offset is the part that is actually hard, so it is the part with
 the most care in it.
 
-Both files are decoded to 128×72 grayscale — about 250 fps for 4K HEVC — and
+Both files are decoded to 128×72 grayscale — about 200 fps for 4K HEVC — and
 reduced to one number per frame. Those two signals are cross-correlated and the
 lag is the offset.
+
+Measured on a 223,615-frame UHD remux at the default settings: **four and a half
+minutes**. It is the slowest thing hibrit does and the only step worth waiting
+on, so it reports each window as it goes.
 
 The signal is **not** mean brightness. Brightness barely moves inside a shot, so
 its correlation surface is a plateau and the peak wanders: on a clip built with

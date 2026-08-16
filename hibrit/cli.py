@@ -112,11 +112,14 @@ def _print_alignment(result: Alignment) -> None:
 def cmd_align(args: argparse.Namespace) -> int:
     box = _toolbox(args)
     result = align(
-        probe(Path(args.source), box),
-        probe(Path(args.target), box),
+        probe(_existing(args.source, "source"), box),
+        probe(_existing(args.target, "target"), box),
         box,
         windows=args.windows,
         max_shift=args.max_shift,
+        # On a feature this runs for minutes. Silence for that long reads as a
+        # hung command, and the natural response is to kill it.
+        progress=lambda message: print(f"  {message}", file=sys.stderr),
     )
     _print_alignment(result)
     return 0 if result.usable else 1

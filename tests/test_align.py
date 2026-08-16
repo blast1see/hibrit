@@ -250,6 +250,27 @@ class TestAlign:
         )
         assert not result.usable
 
+    def test_progress_names_each_window_as_it_starts(self, monkeypatch) -> None:
+        """Four and a half minutes of silence reads as a hung command."""
+        base = shot_curve(30_000, seed=5)
+        self._patch_curves(monkeypatch, base, base[137:])
+        said: list[str] = []
+
+        align(
+            make_info("a.mkv", frames=30_000),
+            make_info("b.mkv", frames=30_000 - 137),
+            toolbox=None,
+            windows=2,
+            progress=said.append,
+        )
+
+        starts = [line for line in said if "decoding" in line]
+        assert len(starts) == 2
+        assert "window 1 of 2" in starts[0]
+        # And the answer for each window arrives as it is found, not only at the
+        # end, so a slow second window does not hide a finished first one.
+        assert any("window 1: offset" in line for line in said)
+
     def test_unknown_frame_count_stops_before_decoding_anything(self) -> None:
         result = align(
             make_info("a.mkv", frames=None),
