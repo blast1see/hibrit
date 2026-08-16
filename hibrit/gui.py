@@ -69,6 +69,9 @@ class App(ttk.Frame):
         self.plan: Plan | None = None
         self.alignment: Alignment | None = None
         self.messages: queue.Queue[tuple[str, object]] = queue.Queue()
+        #: Set when a run reaches its end, however it ended. A worker that dies
+        #: silently would otherwise leave the window looking busy forever.
+        self.finished = False
 
         self._build()
         self.after(100, self._drain)
@@ -317,6 +320,7 @@ class App(ttk.Frame):
             return
         self.run_button["state"] = "disabled"
         self.align_button["state"] = "disabled"
+        self.finished = False
         self._log("")
 
         plan = self.plan
@@ -361,6 +365,17 @@ class App(ttk.Frame):
         threading.Thread(target=work, daemon=True).start()
 
     def _drain(self) -> None:
+        """The message pump, rescheduling itself."""
+        self._drain_once()
+        self.after(100, self._drain)
+
+    def _drain_once(self) -> None:
+        """Empty the queue once and return.
+
+        Split out from the timer loop so a test can pump the window by hand.
+        Waiting on the worker thread directly would pass even if this wiring
+        were broken, and this wiring is the part most likely to be wrong.
+        """
         while True:
             try:
                 kind, payload = self.messages.get_nowait()
@@ -384,7 +399,7 @@ class App(ttk.Frame):
                     "normal" if self.plan and self.plan.needs_alignment else "disabled"
                 )
                 self._refresh_run_button()
-        self.after(100, self._drain)
+                self.finished = True
 
     def _apply_alignment(self, result: Alignment) -> None:
         self.alignment = result

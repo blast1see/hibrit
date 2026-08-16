@@ -11,6 +11,11 @@ directory holding them:
 ``p7_ff.hevc``        1000 frames, Dolby Vision profile 7 plus HDR10+
 ``align_a.mkv``       the profile 8.1 clip in Matroska
 ``align_b.mkv``       a re-encode of ``align_a`` starting at frame 137
+``align_other.mkv``   the profile 7 clip in Matroska — a different film
+
+Those five are the whole list. Everything else these tests need they build,
+because a suite that leans on whatever is left lying in the media directory
+breaks the day somebody tidies it up.
 
 The clips are cut with ``ffmpeg -c copy``, which preserves the metadata NAL
 units exactly, so a second of real footage tests the same code path a

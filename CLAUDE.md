@@ -61,6 +61,13 @@ Three tiers, and the split is deliberate:
 | `pytest -q -m "not tools and not real"` | nothing | the code does what it says |
 | `pytest -q -m tools` | the binaries | the wrappers drive them correctly |
 | `pytest -q -m real` | real clips (`HIBRIT_MEDIA`) | the result is right |
+| `pytest -q -m gui` | a display | the window is wired to the core |
+
+The window tests are out of the default run because a machine without a display
+would report them as failures rather than as something it could not attempt.
+They drive the message queue by hand rather than joining the worker thread: a
+test that waited on the thread would pass even if the queue wiring were broken,
+and the wiring is the part that has actually been wrong.
 
 CI runs the first two. The `tools` tier synthesises everything it needs —
 `dovi_tool generate` writes an RPU with no video involved, ffmpeg builds an HDR10
