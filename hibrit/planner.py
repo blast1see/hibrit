@@ -132,6 +132,20 @@ def _describe_frame_gap(source: VideoInfo, target: VideoInfo) -> str:
     return f"source {a}, target {b}, difference {a - b:+d}"
 
 
+def _describe_duration(frames: int, rate: float) -> str:
+    """A frame gap in units a person can picture.
+
+    The gaps this has to describe run from a trimmed logo to a different cut of
+    the film, so the unit moves with the number. Rounding everything to whole
+    minutes prints "about 0 minutes" for a real difference, which reads as a bug
+    in the message rather than a fact about the files.
+    """
+    seconds = frames / rate if rate else 0.0
+    if seconds < 90:
+        return f"{seconds:.1f} seconds"
+    return f"{seconds / 60:.0f} minutes"
+
+
 def build_plan(
     source: VideoInfo,
     target: VideoInfo,
@@ -294,10 +308,11 @@ def build_plan(
             notes.append(
                 Note(
                     Level.BLOCKER,
-                    f"the two files differ by {gap} frames, about {gap / rate / 60:.0f} "
-                    f"minutes ({gap / span:.0%} of the runtime). Trimmed logos and "
-                    "credits account for seconds, not this. These are a different cut "
-                    "or a different film, and no single offset can align them.",
+                    f"the two files differ by {gap} frames, about "
+                    f"{_describe_duration(gap, rate)} ({gap / span:.0%} of the runtime). "
+                    "Trimmed logos and credits account for a fraction of that. These "
+                    "are a different cut or a different film, and no single offset can "
+                    "align them.",
                 )
             )
         notes.append(
