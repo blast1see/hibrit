@@ -80,6 +80,14 @@ and the number of places it was measured are printed in one line at one size,
 because they are one fact; an untrustworthy result cannot be used without
 ticking a box that says so in words.
 
+### The build
+
+The Windows package was built and run before this was written: `hibrit doctor`
+finds the binaries in the `tools/` folder beside the executable, a full job
+runs through it with every verification check passing, and both executables
+open. A fresh unzip has an empty `tools/`, so doctor reports dovi_tool and
+hdr10plus_tool as missing and prints where to download them.
+
 ### Tests
 
 Four tiers. The first needs nothing installed. The second drives the real
