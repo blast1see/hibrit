@@ -114,6 +114,50 @@ def video_track_properties(source: Path, toolbox: Toolbox | None = None) -> list
     return args
 
 
+def stale_label_warning(name: str | None, result: VideoInfo) -> str | None:
+    """Say so when a preserved track name no longer describes the track.
+
+    Release groups write the metadata into the video track's name. A real remux
+    on this machine carries::
+
+        MPEG-H HEVC Video / 59681 kbps / 2160p / ... / HDR10+ Profile B /
+        Dolby Vision MEL @ 69 kbps
+
+    Convert that to single-layer 8.1, or add HDR10+ to something that had none,
+    and the label is now wrong. Both available answers are bad on their own:
+    editing someone's label is not this program's business, and leaving a
+    description that has quietly become false is worse than dropping it.
+
+    So it is preserved and reported. The file is correct either way — this is
+    not a failure, it is something to go and fix in the name if you care.
+    """
+    if not name:
+        return None
+
+    lowered = name.lower()
+    problems: list[str] = []
+
+    if ("mel" in lowered or "fel" in lowered) and result.dv_profile == 8:
+        problems.append("it mentions an enhancement layer, and this is now single-layer 8.1")
+    for profile in (5, 7):
+        if f"profile {profile}" in lowered and result.dv_profile not in (None, profile):
+            problems.append(
+                f"it says profile {profile}, and this is now profile {result.dv_profile}"
+            )
+    if "hdr10+" in lowered and not result.has_hdr10plus:
+        problems.append("it mentions HDR10+, which this no longer carries")
+    if "hdr10+" not in lowered and result.has_hdr10plus:
+        problems.append("this now carries HDR10+, which the name does not mention")
+
+    if not problems:
+        return None
+    return (
+        "the video track's name was kept as the target had it, but "
+        + "; ".join(problems)
+        + ". The file is right; the label is not."
+    )
+
+
 def remux(
     video: Path,
     donor: VideoInfo,

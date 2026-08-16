@@ -375,3 +375,75 @@ class TestContainerSignalling:
         from hibrit.verify import _check_container_signalling
 
         assert _check_container_signalling(make_info("out.mkv", hdr10plus=True)) == []
+
+
+class TestStaleLabels:
+    """Release groups write the metadata into the video track's name.
+
+    A real remux on this machine carries "MPEG-H HEVC Video / 59681 kbps /
+    2160p / ... / HDR10+ Profile B / Dolby Vision MEL @ 69 kbps". Convert that
+    to single-layer 8.1 and the label is wrong. Editing someone's label is not
+    this program's business and leaving a false one is worse than dropping it,
+    so it is kept and reported.
+    """
+
+    from hibrit.matroska import stale_label_warning as _warn
+
+    @staticmethod
+    def _result(**kwargs):
+        from conftest import make_info
+
+        return make_info("out.mkv", **kwargs)
+
+    def test_the_real_name_after_a_conversion_to_81(self) -> None:
+        from hibrit.matroska import stale_label_warning
+
+        name = (
+            "MPEG-H HEVC Video / 59681 kbps / 2160p / 23.976 fps / 16:9 / "
+            "Main 10 @ Level 5.1 @ High / 10 bits / 4000nits / HDR10+ Profile B / "
+            "Dolby Vision MEL @ 69 kbps"
+        )
+        warning = stale_label_warning(name, self._result(dv=True, dv_profile=8))
+        assert warning is not None
+        assert "enhancement layer" in warning
+        assert "HDR10+" in warning
+        assert "The file is right; the label is not." in warning
+
+    def test_hdr10plus_added_to_a_name_that_does_not_mention_it(self) -> None:
+        from hibrit.matroska import stale_label_warning
+
+        warning = stale_label_warning(
+            "UHD BluRay Remux / HDR10", self._result(dv=True, dv_profile=8, hdr10plus=True)
+        )
+        assert warning is not None
+        assert "does not mention" in warning
+
+    def test_a_profile_number_that_no_longer_matches(self) -> None:
+        from hibrit.matroska import stale_label_warning
+
+        warning = stale_label_warning("Dolby Vision Profile 7", self._result(dv=True, dv_profile=8))
+        assert warning is not None
+        assert "profile 7" in warning
+
+    def test_a_name_that_still_describes_the_file_says_nothing(self) -> None:
+        from hibrit.matroska import stale_label_warning
+
+        assert (
+            stale_label_warning(
+                "UHD BluRay Remux / HDR10+ / Dolby Vision",
+                self._result(dv=True, dv_profile=8, hdr10plus=True),
+            )
+            is None
+        )
+
+    def test_no_name_is_not_a_stale_name(self) -> None:
+        from hibrit.matroska import stale_label_warning
+
+        assert stale_label_warning(None, self._result(dv=True, dv_profile=8)) is None
+        assert stale_label_warning("", self._result(dv=True, dv_profile=8)) is None
+
+    def test_a_plain_descriptive_name_is_left_alone(self) -> None:
+        """Most names say nothing about metadata and must not be nagged about."""
+        from hibrit.matroska import stale_label_warning
+
+        assert stale_label_warning("Blu-ray Remux", self._result(dv=True, dv_profile=8)) is None

@@ -25,8 +25,9 @@ from pathlib import Path
 
 from hibrit.align import Alignment, align, edit_config_for_offset
 from hibrit.hdr10plus import Hdr10PlusTool, read_json
-from hibrit.matroska import extract_video, remux
+from hibrit.matroska import extract_video, remux, stale_label_warning
 from hibrit.planner import Kind, Plan
+from hibrit.probe import probe
 from hibrit.rpu import DoviTool
 from hibrit.tools import Toolbox
 
@@ -372,6 +373,13 @@ def _execute(
     # --- put the container back together -------------------------------------------
     say(f"remuxing to {output}")
     remux(current, target, output, box, progress=tool_output)
+
+    # The target's own labelling came across with it, and it may describe
+    # metadata this job just changed.
+    produced = probe(output, box)
+    stale = stale_label_warning(produced.track.get("Title"), produced)
+    if stale:
+        say(f"note: {stale}")
     if not keep_intermediates:
         current.unlink(missing_ok=True)
 
