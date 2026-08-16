@@ -59,6 +59,24 @@ Summary:
   L9 MDP: DCI-P3 D65
 """
 
+#: A real profile 7 **FEL** remux — Okja. Note the trimmed L2 (one target where
+#: the MEL clip has three) and a MaxCLL of 10000 nits, which is what a full
+#: enhancement layer looks like.
+DOVI_INFO_P7_FEL = """\
+Parsing RPU file...
+
+Summary:
+  Frames: 400
+  Profile: 7 (FEL)
+  DM version: 1 (CM v2.9)
+  Scene/shot count: 2
+  RPU mastering display: 0.0050/4000 nits
+  RPU content light level (L1): MaxCLL: 10000.00 nits, MaxFALL: 2.43 nits
+  L6 metadata: Mastering display: 0.0050/4000 nits. MaxCLL: 9994 nits, MaxFALL: 412 nits
+  L5 offsets: top=276, bottom=277, left=0, right=0
+  L2 trims: 100 nits
+"""
+
 #: `dovi_tool generate -p 5`. Kept because it is the only profile 5 available
 #: anywhere on this machine.
 DOVI_INFO_P5 = """\
@@ -115,18 +133,32 @@ class TestParseInfo:
         assert "P7 (MEL)" in rpu_mod.parse_info(DOVI_INFO_P7).describe()
         assert "4 scenes" in rpu_mod.parse_info(DOVI_INFO_P7).describe()
 
-    def test_fel_is_recognised_though_no_such_file_was_available(self) -> None:
-        """Honest about what this one is.
+    def test_fel_is_read_from_a_real_fel_file(self) -> None:
+        """This used to be a hand-edited word, and said so.
 
-        Every profile 7 clip on this machine is MEL, so the FEL branch is
-        exercised on a hand-edited line rather than on output from a file. It is
-        one word in the same position, and the MEL case above proves the
-        position; that is the whole of the evidence.
+        The claim was that every profile 7 clip here is MEL — true of the one
+        clip I had. Surveying the whole library found five FEL remuxes (Avatar,
+        Okja, Ran, Saving Private Ryan, Top Gun Maverick), so the sample above
+        is now dovi_tool's output on Okja rather than my edit of the MEL one.
+
+        It matters beyond tidiness: converting FEL to 8.1 discards a real
+        enhancement layer, and the planner warns about that on files this user
+        actually owns.
         """
-        fel = DOVI_INFO_P7.replace("Profile: 7 (MEL)", "Profile: 7 (FEL)")
-        info = rpu_mod.parse_info(fel)
+        info = rpu_mod.parse_info(DOVI_INFO_P7_FEL)
+        assert info.profile == 7
         assert info.layer_kind == "FEL"
         assert info.is_fel and not info.is_mel
+        assert info.frames == 400
+        assert info.l5_offsets == (276, 277, 0, 0)
+
+    def test_the_two_profile_7_kinds_are_told_apart(self) -> None:
+        mel = rpu_mod.parse_info(DOVI_INFO_P7)
+        fel = rpu_mod.parse_info(DOVI_INFO_P7_FEL)
+        assert (mel.is_mel, mel.is_fel) == (True, False)
+        assert (fel.is_mel, fel.is_fel) == (False, True)
+        assert "P7 (MEL)" in mel.describe()
+        assert "P7 (FEL)" in fel.describe()
 
 
 class TestMismatchDetection:
