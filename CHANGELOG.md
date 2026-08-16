@@ -62,10 +62,16 @@ by default.
 
 ### Disk
 
-A 70 GB target needs roughly three times its size in working space. `--workdir`
-is required rather than defaulted, because the drive holding the sources is
-usually the one without the room. Free space is checked before the first command
-runs, and each intermediate is deleted as soon as the next step has consumed it.
+A target needs three times its size in working space — traced on a 72 GB remux,
+where three streams coexist before the remux and the peak comes to about 208 GB.
+`--workdir` is required rather than defaulted, because the drive holding the
+sources is usually the one without the room. Free space is checked before the
+first command runs, and each intermediate is deleted as soon as the next step
+has consumed it.
+
+Every step that rewrites the stream takes minutes at that size, so the tools'
+own progress is forwarded as it arrives — thinned to ten-percent steps, since
+raw it is four hundred lines of counting.
 
 ### The window
 
@@ -76,10 +82,11 @@ ticking a box that says so in words.
 
 ### Tests
 
-146, in three tiers. The first needs nothing installed. The second drives the
-real binaries against material it synthesises — `dovi_tool generate` writes an
-RPU with no video involved — and is what CI runs. The third needs real clips and
-is the one that can fail in the most interesting way.
+Four tiers. The first needs nothing installed. The second drives the real
+binaries against material it synthesises — `dovi_tool generate` writes an RPU
+with no video involved — and both of those run in CI, on Linux and Windows. The
+third needs real clips and is the one that can fail in the most interesting way.
+The fourth drives the window, and needs a display.
 
 About half of the tests in the upper two tiers feed inputs that should be
 refused: a shortened RPU, a lengthened one, two unrelated films, a search range

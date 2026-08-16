@@ -237,7 +237,30 @@ DERIVED_HDR10PLUS_KEYS = frozenset({"SceneId", "SceneFrameIndex"})
 
 
 def _hdr10plus_payload(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{k: v for k, v in scene.items() if k not in DERIVED_HDR10PLUS_KEYS} for scene in scenes]
+    """Every per-frame entry with the derived bookkeeping removed."""
+    return [_payload_of(scene) for scene in scenes]
+
+
+def _payload_of(scene: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in scene.items() if k not in DERIVED_HDR10PLUS_KEYS}
+
+
+def _payloads_match(got: list[dict[str, Any]], want: list[dict[str, Any]]) -> int | None:
+    """Index of the first entry that differs, or ``None`` if they all match.
+
+    Compared one entry at a time rather than by building two filtered lists.
+    A feature has an entry per frame — 223,615 of them on the remux this was
+    developed against — and materialising two more copies of that to compare
+    them once is a gigabyte spent to answer a question that can be answered as
+    it goes, and abandoned at the first difference.
+    """
+    # strict: the caller compares lengths first, and this catches one that did
+    # not — silently stopping at the shorter list would call a truncated
+    # metadata stream a match.
+    for index, (left, right) in enumerate(zip(got, want, strict=True)):
+        if _payload_of(left) != _payload_of(right):
+            return index
+    return None
 
 
 def _compare_hdr10plus(
@@ -271,7 +294,8 @@ def _compare_hdr10plus(
             )
         ]
 
-    passed = _hdr10plus_payload(got_scenes) == _hdr10plus_payload(want_scenes)
+    differs_at = _payloads_match(got_scenes, want_scenes)
+    passed = differs_at is None
     return [
         Check(
             "hdr10+ round-trip",
@@ -280,7 +304,8 @@ def _compare_hdr10plus(
                 "every per-frame HDR10+ value matches; only the scene numbering "
                 "differs, which hdr10plus_tool recomputes on extraction"
                 if passed
-                else "the HDR10+ values read back out differ from what was injected"
+                else f"the HDR10+ values read back out differ from what was injected, "
+                f"first at frame {differs_at}"
             ),
         )
     ]
