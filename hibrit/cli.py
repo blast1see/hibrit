@@ -169,6 +169,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         # writing the exact file this program exists to prevent.
         approve=None if args.yes else _ask,
         keep_intermediates=args.keep,
+        skip_reorder=args.skip_reorder,
     )
 
     if args.no_verify:
@@ -264,6 +265,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument("-n", "--dry-run", action="store_true", help="print the plan and stop")
     run_cmd.add_argument("--keep", action="store_true", help="keep intermediate files")
     run_cmd.add_argument("--no-verify", action="store_true")
+    run_cmd.add_argument(
+        "--skip-reorder",
+        action="store_true",
+        help=(
+            "pass --skip-reorder to hdr10plus_tool. Try this if extracting HDR10+ "
+            "fails: the tool reorders metadata into display order, and on a "
+            "misauthored stream that step is what breaks."
+        ),
+    )
     run_cmd.add_argument(
         "--no-picture-check",
         dest="verify_pixels",
