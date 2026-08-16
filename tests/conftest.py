@@ -28,6 +28,23 @@ from hibrit.tools import Toolbox
 MEDIA_DIR = Path(os.environ.get("HIBRIT_MEDIA", r"E:\hibrit-calisma"))
 
 
+def pytest_collection_modifyitems(config, items) -> None:
+    """Mark the tiers that cannot run here as skipped, at collection time.
+
+    This has to happen during collection rather than in an autouse fixture:
+    session-scoped fixtures are set up before function-scoped ones, so a
+    fixture that builds a clip with ffmpeg would run — and fail — before any
+    per-test skip had a chance to fire.
+    """
+    missing = Toolbox().missing_required()
+    if not missing:
+        return
+    skip = pytest.mark.skip(reason=f"external tools not available: {', '.join(missing)}")
+    for item in items:
+        if item.get_closest_marker("tools") or item.get_closest_marker("real"):
+            item.add_marker(skip)
+
+
 @pytest.fixture(scope="session")
 def toolbox() -> Toolbox:
     return Toolbox()
@@ -36,15 +53,6 @@ def toolbox() -> Toolbox:
 @pytest.fixture(scope="session")
 def have_tools(toolbox: Toolbox) -> bool:
     return not toolbox.missing_required()
-
-
-@pytest.fixture(autouse=True)
-def _skip_without_tools(request: pytest.FixtureRequest) -> None:
-    needs_tools = request.node.get_closest_marker("tools") or request.node.get_closest_marker(
-        "real"
-    )
-    if needs_tools and Toolbox().missing_required():
-        pytest.skip("external tools not available")
 
 
 @pytest.fixture(scope="session")
