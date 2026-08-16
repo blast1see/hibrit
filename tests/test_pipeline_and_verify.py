@@ -7,7 +7,7 @@ from conftest import make_info
 
 from hibrit import pipeline
 from hibrit.planner import build_plan
-from hibrit.verify import Check, Report, sha256_file
+from hibrit.verify import Check, Report, picture_digest, sha256_file
 
 
 class TestSpaceCheck:
@@ -58,6 +58,94 @@ class TestReport:
 
     def test_everything_measured_and_passing_says_so_plainly(self) -> None:
         assert Report(checks=(Check("a", True, "fine"),)).describe().endswith("All checks passed.")
+
+
+def annex_b(units: list[tuple[int, bytes]], *, long_start: bool = True) -> bytes:
+    """Assemble an Annex B stream from ``(nal_type, payload)`` pairs."""
+    start = b"\x00\x00\x00\x01" if long_start else b"\x00\x00\x01"
+    out = b""
+    for nal_type, payload in units:
+        header = bytes([(nal_type << 1) & 0xFF, 0x01])
+        out += start + header + payload
+    return out
+
+
+class TestPictureDigest:
+    """The parser that decides whether the picture changed.
+
+    It is worth testing directly because its failure mode is silence: a bug
+    that skipped every unit would hash nothing consistently and report every
+    file as identical to every other.
+    """
+
+    def test_counts_only_the_picture_carrying_units(self, tmp_path) -> None:
+        path = tmp_path / "stream.hevc"
+        path.write_bytes(
+            annex_b(
+                [
+                    (32, b"\xaa" * 8),  # VPS
+                    (33, b"\xbb" * 8),  # SPS
+                    (1, b"\x11" * 40),  # slice
+                    (39, b"\xcc" * 8),  # SEI
+                    (1, b"\x22" * 40),  # slice
+                ]
+            )
+        )
+        _, count = picture_digest(path)
+        assert count == 2
+
+    def test_metadata_added_around_the_picture_does_not_change_the_digest(self, tmp_path) -> None:
+        """The whole point. dovi_tool adds a 7-byte access unit delimiter per
+        frame and RPU units alongside; none of that is picture data."""
+        slices = [(1, b"\x11" * 40), (1, b"\x22" * 40)]
+        bare = tmp_path / "bare.hevc"
+        dressed = tmp_path / "dressed.hevc"
+        bare.write_bytes(annex_b([(33, b"\xbb" * 8), *slices]))
+        dressed.write_bytes(
+            annex_b(
+                [
+                    (35, b"\x50"),  # access unit delimiter
+                    (33, b"\xbb" * 8),
+                    slices[0],
+                    (62, b"\xde\xad" * 20),  # Dolby Vision RPU
+                    (35, b"\x50"),
+                    slices[1],
+                    (39, b"\xcc" * 30),  # HDR10+ SEI
+                ]
+            )
+        )
+        assert picture_digest(bare) == picture_digest(dressed)
+
+    def test_a_changed_slice_does_change_the_digest(self, tmp_path) -> None:
+        a = tmp_path / "a.hevc"
+        b = tmp_path / "b.hevc"
+        a.write_bytes(annex_b([(1, b"\x11" * 40)]))
+        b.write_bytes(annex_b([(1, b"\x11" * 39 + b"\x12")]))
+        assert picture_digest(a) != picture_digest(b)
+
+    def test_three_and_four_byte_start_codes_are_equivalent(self, tmp_path) -> None:
+        units = [(33, b"\xbb" * 8), (1, b"\x11" * 40), (1, b"\x22" * 40)]
+        long_form = tmp_path / "long.hevc"
+        short_form = tmp_path / "short.hevc"
+        long_form.write_bytes(annex_b(units, long_start=True))
+        short_form.write_bytes(annex_b(units, long_start=False))
+        assert picture_digest(long_form) == picture_digest(short_form)
+
+    def test_a_start_code_split_across_reads_is_still_found(self, tmp_path) -> None:
+        """Read boundaries are arbitrary; a 68 GB file has thousands of them."""
+        path = tmp_path / "stream.hevc"
+        path.write_bytes(annex_b([(1, b"\x11" * 500), (1, b"\x22" * 500)]))
+        whole = picture_digest(path)
+        for chunk in (1, 2, 3, 4, 5, 7, 64, 503):
+            assert picture_digest(path, chunk=chunk) == whole, f"chunk={chunk}"
+
+    def test_an_empty_file_is_not_a_match_for_everything(self, tmp_path) -> None:
+        empty = tmp_path / "empty.hevc"
+        empty.write_bytes(b"")
+        real = tmp_path / "real.hevc"
+        real.write_bytes(annex_b([(1, b"\x11" * 40)]))
+        assert picture_digest(empty)[1] == 0
+        assert picture_digest(empty) != picture_digest(real)
 
 
 def test_sha256_matches_hashlib(tmp_path) -> None:

@@ -60,7 +60,9 @@ class App(ttk.Frame):
         self.space_label = tk.StringVar(value="")
         self.alignment_text = tk.StringVar(value="not measured")
         self.override = tk.BooleanVar(value=False)
-        self.verify_pixels = tk.BooleanVar(value=False)
+        # On by default: the check reads the two streams once and compares only
+        # their coded picture units, so it costs a read rather than a rewrite.
+        self.verify_pixels = tk.BooleanVar(value=True)
 
         self.source_info: VideoInfo | None = None
         self.target_info: VideoInfo | None = None
@@ -156,7 +158,7 @@ class App(ttk.Frame):
         self.run_button.grid(row=0, column=0)
         ttk.Checkbutton(
             actions,
-            text="also prove the picture is unchanged (slow: rewrites the output once more)",
+            text="prove the picture is unchanged (one extra read of each stream)",
             variable=self.verify_pixels,
         ).grid(row=0, column=1, sticky="w", padx=8)
         row += 1

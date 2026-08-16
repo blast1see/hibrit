@@ -97,14 +97,19 @@ in a player:
 | Re-extract the HDR10+ JSON, compare | same, for the other layer |
 | RPU frame count vs video frame count | nothing was padded behind your back |
 | Frame count before vs after | the remux dropped nothing |
-| `--verify-pixels`: strip both layers off the result *and* off the original, then compare | **not one bit of picture data changed** |
+| Hash the result's coded picture units and the original's, and compare | **not one bit of picture data changed** |
 
-The last one is the real proof and costs two full rewrites, so it is opt-in.
-Stripping both sides is not redundancy: `mkvextract` and `dovi_tool` write the
-same NAL units as Annex B slightly differently (measured on one clip: 117,524,013
-bytes versus 117,526,056), so comparing a raw extraction against a tool's output
-would fail on a file where nothing changed. A check that fails when it should
-pass is the worst kind, because the natural response is to stop believing it.
+The last one is the real proof. It hashes only the VCL NAL units — the ones that
+carry picture — and ignores every metadata layer and every piece of scaffolding
+around them, so it costs one read of each stream rather than a rewrite, and runs
+by default.
+
+Hashing the whole file instead does not work, and the way it fails is
+instructive: `dovi_tool inject-rpu` adds a seven-byte access unit delimiter to
+every frame that lacks one, and `dovi_tool remove` does not take them back out.
+Blu-ray remuxes already carry those delimiters, so a whole-file comparison passes
+there and fails on a clip straight out of ffmpeg — a check that is wrong only on
+the material you did not test with.
 
 ## Install
 
@@ -193,17 +198,26 @@ dual-layer structure as dual-layer.
 ## Tests
 
 ```
-pytest -q                 # logic only; no binaries, no media
-pytest -q -m tools        # needs dovi_tool, hdr10plus_tool, ffmpeg
-pytest -q -m real         # needs real clips; set HIBRIT_MEDIA
+pytest -q -m "not tools and not real"   # logic only; no binaries, no media
+pytest -q -m tools                      # real binaries, synthesised material
+pytest -q -m real                       # real clips; set HIBRIT_MEDIA
+pytest -q                               # all three
 ```
 
-The `real` tier is the one that can fail in an interesting way. It strips the
-metadata off a real clip and puts it back, and asserts the result hashes
-identically to the original. It also asserts that a deliberately shortened RPU
-is **refused**, and that two unrelated films are **refused** — because a test
-suite that only ever feeds a tool matching pairs never sees what it does with
-the mistake its user is most likely to make.
+The `tools` tier needs no media: `dovi_tool generate` writes an RPU from a JSON
+config with no video involved, and ffmpeg builds a ten-second HDR10 clip in a
+fifth of a second. That is what CI runs — so the code that shells out to the
+external tools is covered there too, not only on one machine.
+
+The `real` tier is the one that can fail in the most interesting way. It strips
+the metadata off a real clip and puts it back, and asserts the result hashes
+identically to the original.
+
+Both of those tiers spend half their tests on inputs that should be **refused**:
+a deliberately shortened RPU, a lengthened one, two unrelated films, a search
+range too narrow to contain the answer. A test suite that only ever feeds a tool
+matching pairs never sees what it does with the mistake its user is most likely
+to make.
 
 ## Licence
 

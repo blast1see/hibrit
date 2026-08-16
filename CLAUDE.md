@@ -58,13 +58,18 @@ Three tiers, and the split is deliberate:
 
 | Command | Needs | Proves |
 |---|---|---|
-| `pytest -q` | nothing | the code does what it says |
-| `pytest -q -m tools` | the binaries | the wrappers call them correctly |
+| `pytest -q -m "not tools and not real"` | nothing | the code does what it says |
+| `pytest -q -m tools` | the binaries | the wrappers drive them correctly |
 | `pytest -q -m real` | real clips (`HIBRIT_MEDIA`) | the result is right |
 
-Only the third tier can fail in an interesting way. When adding a feature that
-touches metadata, add a `real` test where the correct answer is known in
-advance — build the input by a route the code under test does not use.
+CI runs the first two. The `tools` tier synthesises everything it needs —
+`dovi_tool generate` writes an RPU with no video involved, ffmpeg builds an HDR10
+clip in a fifth of a second — so keep it that way: a `tools` test that reaches
+for a file on disk belongs in `real`.
+
+When adding a feature that touches metadata, add a test where the correct answer
+is known in advance, and build the input by a route the code under test does not
+use.
 
 **Always test the refusal.** For every test that feeds a matching pair, add one
 that feeds a mismatched pair and asserts the tool declines. A suite that only

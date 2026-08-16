@@ -5,22 +5,26 @@ these programs exist, but do they actually do the thing? A player showing a
 Dolby Vision badge proves that a flag is set. It does not prove the metadata is
 the metadata that was extracted, and it does not prove the picture survived.
 
-Two tiers, because they cost very different amounts:
+Two kinds of check:
 
 * **Metadata checks** read the result's RPU and HDR10+ back out and compare them
-  against what went in. Cheap: a pass over the output, no rewriting.
-* **The pixel check** strips both layers off the result and compares the hash of
-  what is left against the untouched target stream. If the hashes match, not one
-  bit of picture data changed. This rewrites the stream, so on a 70 GB remux it
-  costs a full extra copy and the time to read it twice — opt in deliberately.
+  against what went in.
+* **The picture check** hashes the coded picture data of the result and of the
+  original target and compares the two. If they match, not one bit of picture
+  data changed. It needs the target's pre-injection video stream, which the
+  pipeline keeps for exactly this purpose.
+
+Neither rewrites anything, so verification costs reads rather than copies.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from hibrit.hdr10plus import Hdr10PlusTool
 from hibrit.matroska import extract_video
@@ -79,6 +83,12 @@ class Report:
         return "\n".join(lines)
 
 
+#: HEVC NAL unit types 0 to 31 are VCL: they carry coded picture data. Everything
+#: from 32 up is parameter sets, SEI messages, access unit delimiters and the
+#: rest of the scaffolding — including where Dolby Vision and HDR10+ live.
+VCL_NAL_MAX = 31
+
+
 def sha256_file(path: Path, *, chunk: int = HASH_CHUNK) -> str:
     """Hash a file without loading it into memory."""
     digest = hashlib.sha256()
@@ -86,6 +96,74 @@ def sha256_file(path: Path, *, chunk: int = HASH_CHUNK) -> str:
         while block := handle.read(chunk):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _nal_units(handle, chunk: int) -> Iterator[bytes]:
+    """Yield Annex B NAL unit payloads from an open binary stream.
+
+    Streamed rather than loaded: these files are the size of the films they came
+    from. Trailing zero bytes are dropped from each unit because they belong to
+    the next four-byte start code, not to this unit.
+    """
+    buffer = b""
+    start: int | None = None
+    at_eof = False
+
+    while not at_eof:
+        block = handle.read(chunk)
+        if block:
+            buffer += block
+        else:
+            at_eof = True
+
+        search = 0
+        while True:
+            found = buffer.find(b"\x00\x00\x01", search)
+            if found < 0:
+                break
+            if start is not None:
+                yield buffer[start:found].rstrip(b"\x00")
+            start = found + 3
+            search = start
+
+        if start is None:
+            # No start code yet; keep only enough to catch one straddling the
+            # chunk boundary.
+            buffer = buffer[-2:]
+        else:
+            buffer = buffer[start - 3 :]
+            start = 3
+
+    if start is not None and len(buffer) > start:
+        yield buffer[start:].rstrip(b"\x00")
+
+
+def picture_digest(path: Path, *, chunk: int = HASH_CHUNK) -> tuple[str, int]:
+    """Hash only the coded picture data, ignoring every metadata layer.
+
+    Returns ``(digest, vcl_nal_count)``.
+
+    Hashing the whole file cannot answer "did the picture change", because
+    injection legitimately rewrites the scaffolding around it. Measured on a
+    synthetic clip: ``dovi_tool inject-rpu`` adds a seven-byte access unit
+    delimiter to every frame that lacks one — 1680 bytes across 240 frames — and
+    ``dovi_tool remove`` does not take them back out. Blu-ray remuxes already
+    carry AUDs, so the same comparison passes there and fails on a clip from
+    ffmpeg, which is the worst way for a check to be wrong.
+
+    Restricting the hash to VCL units answers the question exactly and costs one
+    read instead of a rewrite, which is why this check runs by default.
+    """
+    digest = hashlib.sha256()
+    count = 0
+    with Path(path).open("rb") as handle:
+        for unit in _nal_units(handle, chunk):
+            if not unit:
+                continue
+            if ((unit[0] >> 1) & 0x3F) <= VCL_NAL_MAX:
+                digest.update(unit)
+                count += 1
+    return digest.hexdigest(), count
 
 
 def _compare_rpu(result: Path, expected: Path, workdir: Path, toolbox: Toolbox) -> list[Check]:
@@ -131,6 +209,20 @@ def _compare_rpu(result: Path, expected: Path, workdir: Path, toolbox: Toolbox) 
     return checks
 
 
+#: Per-frame HDR10+ keys that hdr10plus_tool re-derives when it reads metadata
+#: back out of a bitstream, rather than carrying through what was written.
+#: Measured: inject 240 frames all belonging to scene 0, extract, and the tool
+#: reports 240 scenes — it decides where a scene begins by noticing that the
+#: luminance values changed. That bookkeeping is a description of the payload,
+#: not part of it, so comparing it would report a difference on metadata that
+#: transferred perfectly.
+DERIVED_HDR10PLUS_KEYS = frozenset({"SceneId", "SceneFrameIndex"})
+
+
+def _hdr10plus_payload(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{k: v for k, v in scene.items() if k not in DERIVED_HDR10PLUS_KEYS} for scene in scenes]
+
+
 def _compare_hdr10plus(
     result: Path, expected: Path, workdir: Path, toolbox: Toolbox
 ) -> list[Check]:
@@ -138,80 +230,87 @@ def _compare_hdr10plus(
     extracted = workdir / "verify_hdr10plus.json"
     tool.extract(result, extracted)
 
-    # The same program wrote both files, so byte equality is the normal outcome;
-    # a semantic comparison is the fallback in case a version changes its
-    # formatting, since what matters is the per-frame values, not the whitespace.
-    same_bytes = sha256_file(extracted) == sha256_file(expected)
-    if same_bytes:
-        detail = "the HDR10+ metadata read back out is byte-for-byte identical"
-        passed = True
-    else:
-        got = json.loads(extracted.read_text(encoding="utf-8"))
-        want = json.loads(Path(expected).read_text(encoding="utf-8"))
-        passed = got.get("SceneInfo") == want.get("SceneInfo")
-        detail = (
-            "the per-frame HDR10+ values match, though the files are not byte-identical"
-            if passed
-            else "the HDR10+ metadata read back out differs from what was injected"
+    if sha256_file(extracted) == sha256_file(expected):
+        return [
+            Check(
+                "hdr10+ round-trip",
+                True,
+                "the HDR10+ metadata read back out is byte-for-byte identical",
+            )
+        ]
+
+    got = json.loads(extracted.read_text(encoding="utf-8"))
+    want = json.loads(Path(expected).read_text(encoding="utf-8"))
+    got_scenes = got.get("SceneInfo") or []
+    want_scenes = want.get("SceneInfo") or []
+
+    if len(got_scenes) != len(want_scenes):
+        return [
+            Check(
+                "hdr10+ round-trip",
+                False,
+                f"the result carries {len(got_scenes)} frames of HDR10+ metadata, "
+                f"{len(want_scenes)} were injected",
+            )
+        ]
+
+    passed = _hdr10plus_payload(got_scenes) == _hdr10plus_payload(want_scenes)
+    return [
+        Check(
+            "hdr10+ round-trip",
+            passed,
+            (
+                "every per-frame HDR10+ value matches; only the scene numbering "
+                "differs, which hdr10plus_tool recomputes on extraction"
+                if passed
+                else "the HDR10+ values read back out differ from what was injected"
+            ),
         )
-    return [Check("hdr10+ round-trip", passed, detail)]
-
-
-def _strip_all(source: Path, workdir: Path, tag: str, toolbox: Toolbox) -> Path:
-    """Remove every layer of dynamic metadata, leaving the base bitstream.
-
-    The result is unwrapped from its container first: both tools read Matroska
-    but neither will rewrite it (``Remover: Matroska format unsupported``).
-    """
-    unwrapped = workdir / f"verify_{tag}_unwrapped.hevc"
-    interim = workdir / f"verify_{tag}_no_hdr10plus.hevc"
-    stripped = workdir / f"verify_{tag}_stripped.hevc"
-
-    stream = extract_video(source, unwrapped, toolbox)
-    Hdr10PlusTool(toolbox).remove(stream, interim)
-    DoviTool(toolbox).remove(interim, stripped)
-
-    interim.unlink(missing_ok=True)
-    if stream == unwrapped:
-        unwrapped.unlink(missing_ok=True)
-    return stripped
+    ]
 
 
 def _compare_pixels(
     result: Path, clean_target: Path, workdir: Path, toolbox: Toolbox
 ) -> list[Check]:
-    """Strip both files down to bare bitstream and compare what is left.
+    """Compare the coded picture data of the result against the original target.
 
     *clean_target* is the target's video stream as it was before injection.
-
-    Both sides go through the same strip, and that is not redundancy — it is
-    what makes the comparison valid. Measured on a real clip: ``mkvextract``
-    writes an Annex B stream of 117,524,013 bytes, while ``dovi_tool remove``
-    writes the same picture as 117,526,056. Neither is wrong; they simply do not
-    agree byte for byte on how to emit the same NAL units. Comparing a raw
-    extraction against a tool's output would report a difference on a file where
-    nothing changed, which is a check that fails when it should pass — the worst
-    kind, because the natural response is to stop trusting the check.
+    Both sides are reduced to a hash over their VCL NAL units only, so every
+    metadata layer — and every piece of scaffolding either tool decided to add
+    or reorder — is excluded by construction. See :func:`picture_digest`.
     """
-    stripped_result = _strip_all(result, workdir, "result", toolbox)
-    stripped_target = _strip_all(clean_target, workdir, "target", toolbox)
+    unwrapped = workdir / "verify_result.hevc"
+    stream = extract_video(result, unwrapped, toolbox)
 
-    same = sha256_file(stripped_result) == sha256_file(stripped_target)
-    stripped_result.unlink(missing_ok=True)
-    stripped_target.unlink(missing_ok=True)
-    return [
+    result_digest, result_frames = picture_digest(stream)
+    target_digest, target_frames = picture_digest(Path(clean_target))
+
+    if stream == unwrapped:
+        unwrapped.unlink(missing_ok=True)
+
+    checks = [
         Check(
             "picture untouched",
-            same,
+            result_digest == target_digest,
             (
-                "with the metadata stripped off, the result and the original target "
-                "are byte-identical; not one bit of picture data changed"
-                if same
-                else "the stripped result does not match the stripped target — "
+                f"every coded picture unit is identical to the original target "
+                f"({result_frames} units); not one bit of picture data changed"
+                if result_digest == target_digest
+                else "the coded picture data differs from the original target — "
                 "something other than metadata was modified"
             ),
         )
     ]
+    if result_frames != target_frames:
+        checks.append(
+            Check(
+                "picture unit count",
+                False,
+                f"the result has {result_frames} coded picture units, the target had "
+                f"{target_frames}",
+            )
+        )
+    return checks
 
 
 def verify(
@@ -228,8 +327,8 @@ def verify(
 
     *rpu* and *hdr10plus* are the metadata files that were injected; each is
     compared against what can be read back out. *clean_target_stream* enables
-    the pixel check — pass the target's extracted ``.hevc`` from before
-    injection, or leave it out to skip that tier.
+    the picture check — pass the target's extracted ``.hevc`` from before
+    injection, which :func:`hibrit.pipeline.run` keeps by default.
     """
     box = toolbox or Toolbox()
     workdir = Path(workdir)
@@ -276,8 +375,7 @@ def verify(
             Check(
                 "picture untouched",
                 True,
-                "not run — pass the target's pre-injection video stream to check it. "
-                "It costs a full rewrite of the output.",
+                "not run — pass the target's pre-injection video stream to check it",
                 skipped=True,
             )
         )
