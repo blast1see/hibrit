@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,7 @@ class Hdr10PlusTool:
         *,
         video_frames: int | None = None,
         frame_tolerance: int = DEFAULT_FRAME_TOLERANCE,
+        progress: Callable[[str], None] | None = None,
     ) -> Path:
         """Interleave HDR10+ SEI NAL units into *video*.
 
@@ -112,6 +114,7 @@ class Hdr10PlusTool:
         proc = self.box.run(
             "hdr10plus_tool",
             ["inject", "-i", str(video), "-j", str(metadata), "-o", str(out)],
+            on_output=progress,
         )
         mismatch = find_mismatch(f"{proc.stdout}\n{proc.stderr}")
         if mismatch is not None:

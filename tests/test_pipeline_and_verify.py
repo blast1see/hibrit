@@ -31,6 +31,59 @@ class TestSpaceCheck:
         assert pipeline.free_space(tmp_path / "not" / "created" / "yet") > 0
 
 
+class TestThrottleProgress:
+    """Thinning the counters without losing the messages between them."""
+
+    def test_a_line_per_percent_becomes_a_line_per_ten(self) -> None:
+        seen: list[str] = []
+        forward = pipeline.throttle_progress(seen.append)
+        for percent in range(101):
+            forward(f"Progress: {percent}%")
+        assert len(seen) == 11
+        assert seen[0].endswith("0%")
+        assert seen[-1].endswith("100%")
+
+    def test_translated_output_is_thinned_too(self) -> None:
+        """mkvmerge speaks the system language.
+
+        On the machine this was written for it reports "İlerleme: 42%", so a
+        filter keyed to the word "Progress" would have passed every test written
+        in English and thinned nothing in practice.
+        """
+        seen: list[str] = []
+        forward = pipeline.throttle_progress(seen.append)
+        for percent in range(101):
+            forward(f"İlerleme: {percent}%")
+        assert len(seen) == 11
+
+    def test_everything_that_is_not_a_counter_passes_through(self) -> None:
+        seen: list[str] = []
+        forward = pipeline.throttle_progress(seen.append)
+        forward("Parsing RPU file...")
+        forward("Progress: 0%")
+        forward("Rewriting file with interleaved RPU NALs..")
+        forward("Progress: 3%")  # inside the same step, dropped
+        forward("Warning: mismatched lengths. video 1000, RPU 800")
+        assert seen == [
+            "Parsing RPU file...",
+            "Progress: 0%",
+            "Rewriting file with interleaved RPU NALs..",
+            "Warning: mismatched lengths. video 1000, RPU 800",
+        ]
+
+    def test_a_second_operation_starts_counting_again(self) -> None:
+        """Four tools run in sequence and each restarts at zero. Without a reset
+        the second one's counter would be silent all the way to 100."""
+        seen: list[str] = []
+        forward = pipeline.throttle_progress(seen.append)
+        for percent in (0, 50, 100):
+            forward(f"Progress: {percent}%")
+        seen.clear()
+        for percent in (0, 20, 60):
+            forward(f"Progress: {percent}%")
+        assert len(seen) == 3
+
+
 class TestRunRefusals:
     def test_a_blocked_plan_never_starts(self, tmp_path) -> None:
         plan = build_plan(make_info("a.mkv"), make_info("b.mkv"))

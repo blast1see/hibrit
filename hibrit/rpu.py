@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -187,6 +188,7 @@ class DoviTool:
         out: Path,
         *,
         frame_tolerance: int = DEFAULT_FRAME_TOLERANCE,
+        progress: Callable[[str], None] | None = None,
     ) -> Path:
         """Interleave RPU NAL units into *video*.
 
@@ -197,6 +199,7 @@ class DoviTool:
         proc = self.box.run(
             "dovi_tool",
             ["inject-rpu", "-i", str(video), "--rpu-in", str(rpu), "-o", str(out)],
+            on_output=progress,
         )
         combined = f"{proc.stdout}\n{proc.stderr}"
         mismatch = find_mismatch(combined)

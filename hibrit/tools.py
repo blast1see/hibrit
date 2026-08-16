@@ -22,7 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,6 +150,7 @@ class Toolbox:
         check: bool = True,
         capture: bool = True,
         cwd: Path | None = None,
+        on_output: Callable[[str], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run *name* with *args*.
 
@@ -157,20 +158,77 @@ class Toolbox:
         That matters more than usual here: dovi_tool reports a frame-count
         mismatch on stderr while still exiting 0, so the only way to catch it
         is to read the output. See :mod:`hibrit.rpu`.
+
+        *on_output* forwards each line as it arrives instead of at the end.
+        Rewriting a 68 GB stream takes minutes during which these tools print
+        their progress and hibrit would otherwise swallow all of it, leaving a
+        command that looks hung. The output is still collected and returned, so
+        nothing that inspects it has to change.
         """
         exe = self.require(name)
         argv = [str(exe), *[str(a) for a in args]]
-        proc = subprocess.run(
-            argv,
-            capture_output=capture,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=str(cwd) if cwd else None,
-        )
+
+        if on_output is None:
+            proc = subprocess.run(
+                argv,
+                capture_output=capture,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=str(cwd) if cwd else None,
+            )
+        else:
+            proc = self._run_streaming(argv, cwd, on_output)
+
         if check and proc.returncode != 0:
             raise ToolFailed(argv, proc.returncode, proc.stderr or "")
         return proc
+
+    @staticmethod
+    def _run_streaming(
+        argv: list[str], cwd: Path | None, on_output: Callable[[str], None]
+    ) -> subprocess.CompletedProcess[str]:
+        """Run *argv*, forwarding output as it appears.
+
+        Read in small chunks and split on carriage returns as well as newlines:
+        every one of these tools draws its progress by returning to the start of
+        the line, so waiting for a newline would wait for the whole operation
+        and defeat the point.
+        """
+        collected: list[str] = []
+        partial = ""
+
+        def emit(line: str) -> None:
+            text = line.strip()
+            if text:
+                collected.append(text)
+                on_output(text)
+
+        with subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            cwd=str(cwd) if cwd else None,
+        ) as process:
+            assert process.stdout is not None
+            while True:
+                chunk = process.stdout.read(256)
+                if not chunk:
+                    break
+                partial += chunk
+                partial = partial.replace("\r\n", "\n").replace("\r", "\n")
+                *lines, partial = partial.split("\n")
+                for line in lines:
+                    emit(line)
+            emit(partial)
+            returncode = process.wait()
+
+        text = "\n".join(collected)
+        return subprocess.CompletedProcess(argv, returncode, text, text)
 
     def version_of(self, name: str) -> str | None:
         """Best-effort version string, or ``None`` if the tool is absent."""
