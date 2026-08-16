@@ -195,3 +195,50 @@ class TestBasics:
 
     def test_compatibility_is_split_on_slashes(self) -> None:
         assert parse_mediainfo(DUNE, HERE).dv_compatibility == ("Blu-ray", "HDR10+ Profile B")
+
+
+class TestStandardRates:
+    """Older MediaInfo builds report only a decimal, and a decimal is a lie.
+
+    Measured: MediaInfo 21.03 omits FrameRate_Num/Den where 26.05 provides
+    them, so the same file probes as 2997/125 on one machine and 24000/1001 on
+    another. Seeking by timestamp is the one place hibrit turns frames into
+    seconds, and it should not depend on which mediainfo happens to be on PATH.
+    """
+
+    @pytest.mark.parametrize(
+        ("decimal", "exact"),
+        [
+            ("23.976", Fraction(24000, 1001)),
+            ("29.970", Fraction(30000, 1001)),
+            ("59.940", Fraction(60000, 1001)),
+            ("24.000", Fraction(24)),
+            ("25.000", Fraction(25)),
+            ("50.000", Fraction(50)),
+        ],
+    )
+    def test_a_rounded_decimal_becomes_the_rate_it_is_a_rounding_of(
+        self, decimal: str, exact: Fraction
+    ) -> None:
+        video = dict(CASINO["media"]["track"][1])
+        video.pop("FrameRate_Num")
+        video.pop("FrameRate_Den")
+        video["FrameRate"] = decimal
+        assert parse_mediainfo(payload_exactly(video), HERE).frame_rate == exact
+
+    def test_the_exact_pair_is_still_preferred_when_present(self) -> None:
+        """A newer build gives the fraction outright; nothing should round it."""
+        assert parse_mediainfo(DUNE, HERE).frame_rate == Fraction(24000, 1001)
+
+    def test_an_unusual_rate_is_left_alone(self) -> None:
+        """Snapping is for rounding error, not for deciding what a file may be."""
+        from hibrit.probe import snap_to_standard_rate
+
+        odd = Fraction(1000, 100)  # 10 fps, a timelapse or a GIF rip
+        assert snap_to_standard_rate(odd) == odd
+
+    def test_2997_over_125_is_what_this_actually_fixes(self) -> None:
+        """The exact value MediaInfo 21.03 produced on the developer's disk."""
+        from hibrit.probe import snap_to_standard_rate
+
+        assert snap_to_standard_rate(Fraction(2997, 125)) == Fraction(24000, 1001)

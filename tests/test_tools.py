@@ -2,9 +2,14 @@
 
 The order matters: a project-local ``tools/`` copy must win over whatever is on
 PATH. The machine this was written on has MediaInfo 21.03 from 2021 sitting in
-``C:\\dee`` as part of an unrelated install, and it does not report the fields
-hibrit needs. Silently picking that one up would produce a wrong diagnosis
-rather than an error.
+``C:\\dee`` as part of an unrelated install, and a frozen build with an empty
+``tools/`` finds it — which is how that path came to be tested at all.
+
+It turns out to be harmless. Measured against 26.05 on three real files, every
+HDR field agrees; the only difference is that 21.03 omits FrameRate_Num/Den,
+which :func:`hibrit.probe.snap_to_standard_rate` repairs. The ordering still
+matters, but for choosing a build deliberately rather than for avoiding a
+broken one.
 """
 
 from __future__ import annotations

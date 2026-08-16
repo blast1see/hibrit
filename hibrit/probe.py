@@ -137,6 +137,47 @@ def _parse_dv_profile(profile_field: str | None) -> int | None:
     return None
 
 
+#: The frame rates video actually ships at. A closed set, and every one of the
+#: fractional ones is a whole rate divided by 1001.
+STANDARD_RATES: tuple[Fraction, ...] = (
+    Fraction(24000, 1001),  # 23.976
+    Fraction(24),
+    Fraction(25),
+    Fraction(30000, 1001),  # 29.97
+    Fraction(30),
+    Fraction(48000, 1001),
+    Fraction(48),
+    Fraction(50),
+    Fraction(60000, 1001),  # 59.94
+    Fraction(60),
+)
+
+#: How close a decimal has to be to a standard rate to be treated as one.
+#: 23.976 differs from 24000/1001 in the fifth decimal place; nothing else in
+#: the list is anywhere near that gap.
+RATE_TOLERANCE = Fraction(1, 1000)
+
+
+def snap_to_standard_rate(rate: Fraction) -> Fraction:
+    """Round a decimal frame rate to the exact fraction it is a rounding of.
+
+    Older MediaInfo builds report only ``FrameRate`` as a decimal string, so
+    "23.976" parses to 2997/125 — a number no video was ever shot at. The real
+    rate is 24000/1001, which differs in the fifth decimal place.
+
+    Measured: MediaInfo 21.03 omits FrameRate_Num/Den where 26.05 provides
+    them, so the same file probes as 2997/125 on one machine and 24000/1001 on
+    another. The error is small — under half a frame across a three-hour film,
+    which the window-agreement tolerance absorbs — but seeking by timestamp is
+    the one place hibrit converts frames to seconds, and being exactly right
+    costs a lookup in a list of ten.
+    """
+    for standard in STANDARD_RATES:
+        if abs(rate - standard) < RATE_TOLERANCE:
+            return standard
+    return rate
+
+
 def _parse_frame_rate(track: dict[str, Any]) -> Fraction | None:
     num = track.get("FrameRate_Num")
     den = track.get("FrameRate_Den")
@@ -148,7 +189,7 @@ def _parse_frame_rate(track: dict[str, Any]) -> Fraction | None:
     rate = track.get("FrameRate")
     if rate:
         try:
-            return Fraction(str(rate)).limit_denominator(100000)
+            return snap_to_standard_rate(Fraction(str(rate)).limit_denominator(100000))
         except (ValueError, ZeroDivisionError):
             return None
     return None
