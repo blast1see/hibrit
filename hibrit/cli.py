@@ -239,9 +239,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument("--keep", action="store_true", help="keep intermediate files")
     run_cmd.add_argument("--no-verify", action="store_true")
     run_cmd.add_argument(
-        "--verify-pixels",
-        action="store_true",
-        help="also prove the picture is unchanged (rewrites the output once more)",
+        "--no-picture-check",
+        dest="verify_pixels",
+        action="store_false",
+        help="skip proving the picture is unchanged (it costs one extra read)",
     )
     run_cmd.set_defaults(func=cmd_run)
 

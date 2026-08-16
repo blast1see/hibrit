@@ -41,24 +41,57 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
 
+      # The `tools` tier drives the real binaries against material it
+      # synthesises: dovi_tool writes an RPU from a JSON config with no video
+      # involved, and ffmpeg builds a ten-second HDR10 clip in a fifth of a
+      # second. That is cheap enough for a runner, and without it every line
+      # that shells out would be covered on one developer's machine only.
+      #
+      # Installed from the projects' own releases rather than a packaging
+      # action, pinned so a run that passes today passes tomorrow. This is the
+      # part nobody notices has stopped working.
+      - name: dovi_tool and hdr10plus_tool (Linux)
+        if: runner.os == 'Linux'
+        env:
+          DOVI_TOOL_VERSION: "2.3.3"
+          HDR10PLUS_TOOL_VERSION: "1.7.2"
+        run: |
+          mkdir -p tools
+          base=https://github.com/quietvoid
+          curl -fsSL "$base/dovi_tool/releases/download/${DOVI_TOOL_VERSION}/dovi_tool-${DOVI_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C tools
+          curl -fsSL "$base/hdr10plus_tool/releases/download/${HDR10PLUS_TOOL_VERSION}/hdr10plus_tool-${HDR10PLUS_TOOL_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C tools
+          chmod +x tools/dovi_tool tools/hdr10plus_tool
+
+      - name: ffmpeg, mkvtoolnix and mediainfo (Linux)
+        if: runner.os == 'Linux'
+        # Through the runner's own package manager: the synthetic clip needs
+        # libx265 with 10-bit support, which the distribution build has.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg mkvtoolnix mediainfo
+
       - run: pip install -e ".[dev]"
 
-      # The unmarked tier is pure logic and needs nothing installed. The
-      # `tools` and `real` tiers are deliberately not run here: the binaries are
-      # third-party releases and the media is tens of gigabytes of films. They
-      # run on the developer's machine, and the README says so rather than
-      # letting a green tick imply they ran.
-      #
-      # Hence the lower coverage bar. Everything that shells out to dovi_tool or
-      # ffmpeg is unreachable from this tier by construction, so enforcing the
-      # project's real gate (80%, see pyproject.toml) here would only be
-      # satisfiable by mocking the subprocesses — which would test the mocks.
-      # This number exists to catch a module going dark, not to certify the
-      # suite. The measured figure for this tier is 66%.
-      - name: Unit tests
-        run: pytest -q -m "not tools and not real" --cov=hibrit --cov-fail-under=60
+      - name: What this runner can do
+        run: python -m hibrit doctor
+        # Windows installs nothing, so doctor reports what is missing and the
+        # tools tier skips itself. That is the intended outcome, not a failure.
+        continue-on-error: true
 
-      - name: The package imports and answers for itself
+      # The `real` tier stays out: it needs tens of gigabytes of films. It runs
+      # on the developer's machine, and the README says so rather than letting a
+      # green tick imply it ran.
+      #
+      # Hence the slightly lower coverage bar than the project's own 80% gate
+      # (see pyproject.toml): the paths only real media reaches — profile 7
+      # conversion, alignment against an actual second encode — are unreachable
+      # here by construction. Measured for this tier: 78%.
+      - name: Tests
+        run: pytest -q -m "not real" --cov=hibrit --cov-fail-under=72
+
+      - name: The package answers for itself
         run: python -m hibrit --version
 
   package:
