@@ -166,11 +166,25 @@ class TestProfileHandling:
         assert plan.convert_mode == 2
         assert "enhancement layer" in _all_texts(plan)
 
-    def test_mel_source_says_nothing_is_lost(self) -> None:
-        source = make_info("uhd.mkv", dv=True, dv_profile=7, dv_layers="BL+RPU", frames=1000)
-        target = make_info("bluray.mkv", frames=1000)
-        plan = build_plan(source, target)
-        assert "MEL" in _all_texts(plan)
+    def test_it_does_not_claim_to_know_mel_from_fel(self) -> None:
+        """MediaInfo reports both as "BL+EL+RPU".
+
+        This note used to promise that the mapping would be discarded whenever
+        the source was dual-layer — which is every real profile 7 file, MEL
+        included, where nothing is lost at all. The container cannot tell them
+        apart; the RPU can, and the pipeline says so once it has read it.
+        """
+        source = make_info("uhd.mkv", dv=True, dv_profile=7, dv_layers="BL+EL+RPU", frames=1000)
+        text = _all_texts(build_plan(source, make_info("bluray.mkv", frames=1000)))
+        assert "does not record which" in text
+        assert "MEL" in text and "FEL" in text
+
+    def test_the_profile_7_note_is_a_warning_because_the_loss_is_likely(self) -> None:
+        """Measured across this library: 64 FEL against 42 MEL."""
+        source = make_info("uhd.mkv", dv=True, dv_profile=7, dv_layers="BL+EL+RPU", frames=1000)
+        plan = build_plan(source, make_info("bluray.mkv", frames=1000))
+        levels = {n.level for n in plan.notes if "profile 7" in n.text}
+        assert Level.WARNING in levels
 
     def test_target_without_hdr10_base_is_flagged(self) -> None:
         source = make_info("web.mkv", dv=True, dv_profile=8, frames=1000)

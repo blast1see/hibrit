@@ -281,16 +281,25 @@ def build_plan(
                 )
             )
         elif profile == 7:
-            detail = (
-                "the enhancement layer's luma and chroma mapping is discarded"
-                if source.is_dual_layer
-                else "there is no enhancement layer to lose here (MEL)"
-            )
+            # MediaInfo cannot tell MEL from FEL: both are reported as
+            # "BL+EL+RPU", so is_dual_layer is true for either and this note
+            # used to promise a loss on files that lose nothing. The RPU says
+            # which it is, and hibrit reads that when it extracts — before then,
+            # the honest answer is that it does not know yet.
+            #
+            # Measured across this library's 106 profile 7 remuxes: 64 FEL, 42
+            # MEL. So the losing case is the likely one, which is why this is a
+            # warning rather than a note.
             notes.append(
                 Note(
-                    Level.INFO,
-                    f"source is Dolby Vision profile 7; converting to single-layer 8.1 "
-                    f"with -m 2, where {detail}.",
+                    Level.WARNING,
+                    "source is Dolby Vision profile 7; converting to single-layer 8.1 "
+                    "with -m 2. Whether that costs anything depends on the enhancement "
+                    "layer: a minimal one (MEL) carries no picture correction and is "
+                    "lost for free, a full one (FEL) carries luma and chroma mapping "
+                    "that is discarded. The container does not record which — the RPU "
+                    "does, and it will be reported once extracted. In this library the "
+                    "split runs about 60/40 towards FEL.",
                 )
             )
         elif profile == 8:

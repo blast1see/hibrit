@@ -320,7 +320,23 @@ def _execute(
             + (f" and converting to profile 8.1 (-m {mode})" if mode else "")
         )
         rpu = dovi.extract_rpu(source.path, workdir / "rpu.bin", mode=mode)
-        say(f"RPU: {dovi.info(rpu).describe()}")
+        rpu_info = dovi.info(rpu)
+        say(f"RPU: {rpu_info.describe()}")
+        if mode == 2:
+            # The planner could not know which kind of profile 7 this was —
+            # the container reports MEL and FEL identically. The RPU does not.
+            source_info = dovi.info(
+                dovi.extract_rpu(source.path, workdir / "rpu_asis.bin", mode=None)
+            )
+            if source_info.is_fel:
+                say(
+                    "note: the source is profile 7 FEL, so converting to 8.1 has "
+                    "discarded the enhancement layer's luma and chroma mapping. "
+                    "The result is valid Dolby Vision; it is not the full grade."
+                )
+            elif source_info.is_mel:
+                say("the source is profile 7 MEL, so nothing was lost converting it")
+            (workdir / "rpu_asis.bin").unlink(missing_ok=True)
 
     if Kind.HDR10PLUS in plan.transfer:
         say("extracting HDR10+ metadata")
