@@ -397,6 +397,79 @@ class TestEndToEnd:
         assert after.has_hdr10plus and after.has_dv and after.is_dual_layer
 
 
+class TestAwkwardFilenames:
+    """Names with characters outside ASCII, on the platform that mangles them.
+
+    This library is full of them — ``Dağ (2012)...mkv``,
+    ``Babam.ve.Oglum.2005...mkv`` — and every one of these tools is a separate
+    program receiving the path as an argument and printing it back in its own
+    encoding. A failure here would meet the user on their first real file.
+    """
+
+    #: Dotted and dotless i, ş, ğ, ü, plus the spaces and parentheses that
+    #: release names carry anyway.
+    AWKWARD = "Dağ Şölen (2012) çıkış İĞÜ.mkv"  # noqa: RUF001
+
+    @pytest.fixture
+    def awkward_copy(self, media: Path, tmp_path: Path) -> Path:
+        import shutil
+
+        source = _need(media, "align_a.mkv")
+        target = tmp_path / self.AWKWARD
+        shutil.copy2(source, target)
+        return target
+
+    def test_mediainfo_reads_it_and_gives_the_name_back_intact(
+        self, awkward_copy: Path, toolbox
+    ) -> None:
+        info = probe(awkward_copy, toolbox)
+        assert info.name == awkward_copy.name
+        assert info.frame_count == 1000
+        assert info.has_dv
+
+    def test_dovi_tool_and_mkvextract_take_the_path(
+        self, awkward_copy: Path, toolbox, tmp_path: Path
+    ) -> None:
+        from hibrit.matroska import extract_video
+
+        rpu = DoviTool(toolbox).extract_rpu(awkward_copy, tmp_path / "rpu.bin")
+        assert DoviTool(toolbox).info(rpu).frames == 1000
+
+        stream = extract_video(awkward_copy, tmp_path / "stream.hevc", toolbox)
+        assert stream.stat().st_size > 0
+
+    def test_the_whole_job_runs_on_one(
+        self, awkward_copy: Path, media: Path, toolbox, tmp_path: Path
+    ) -> None:
+        """Source and target both awkwardly named, output too."""
+        from hibrit.pipeline import run
+        from hibrit.planner import build_plan
+        from hibrit.verify import verify
+
+        clip = _need(media, "p8_clip.hevc")
+        clean = DoviTool(toolbox).remove(clip, tmp_path / "clean.hevc")
+        target = tmp_path / f"hedef {self.AWKWARD}"
+        toolbox.run("mkvmerge", ["-q", "-o", str(target), str(clean)], check=False)
+
+        plan = build_plan(probe(awkward_copy, toolbox), probe(target, toolbox))
+        assert plan.ok
+
+        out = tmp_path / f"çıktı {self.AWKWARD}"  # noqa: RUF001
+        workdir = tmp_path / "çalışma"  # noqa: RUF001
+        result = run(plan, out, workdir=workdir, toolbox=toolbox)
+
+        report = verify(
+            result.output,
+            target=target,
+            rpu=result.rpu,
+            clean_target_stream=result.clean_target_stream,
+            workdir=workdir,
+            toolbox=toolbox,
+        )
+        assert report.passed, report.describe()
+        assert out.exists()
+
+
 class TestProbeReadsRealFiles:
     def test_reads_dolby_vision_and_hdr10plus_together(self, media: Path, toolbox) -> None:
         info = probe(_need(media, "align_a.mkv"), toolbox)
