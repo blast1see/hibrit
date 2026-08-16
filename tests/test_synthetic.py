@@ -973,3 +973,127 @@ class TestSkipReorder:
         with pytest.raises(ToolFailed):
             Hdr10PlusTool(toolbox).extract(hdr10_clip, out)
         assert not out.exists()
+
+
+class TestTrackLabelling:
+    """What ``--no-video`` takes away with the donor's video track.
+
+    The new video track is built from a raw Annex B stream and carries no name,
+    no language and no flags. Dropping the donor's video track drops its
+    labelling too, so a remux whose video track was called "Blu-ray Remux" came
+    out with an unnamed one. Measured on a target built for the purpose, since
+    none of the test clips had a label to lose.
+    """
+
+    @staticmethod
+    def _properties(path: Path, toolbox) -> dict:
+        payload = json.loads(toolbox.run("mkvmerge", ["-J", str(path)], check=False).stdout)
+        video = next(t for t in payload["tracks"] if t["type"] == "video")
+        return video["properties"]
+
+    @pytest.fixture
+    def labelled_target(self, hdr10_clip, toolbox, tmp_path: Path) -> Path:
+        out = tmp_path / "labelled.mkv"
+        toolbox.run(
+            "mkvmerge",
+            [
+                "-q",
+                "-o",
+                str(out),
+                "--track-name",
+                "0:Blu-ray Remux",
+                "--language",
+                "0:eng",
+                str(hdr10_clip),
+            ],
+            check=False,
+        )
+        return out
+
+    def test_the_name_and_language_survive_the_remux(
+        self, labelled_target, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        from hibrit.matroska import extract_video, remux
+
+        stream = extract_video(labelled_target, tmp_path / "t.hevc", toolbox)
+        injected = DoviTool(toolbox).inject_rpu(stream, synthetic_rpu, tmp_path / "dv.hevc")
+        out = remux(injected, probe(labelled_target, toolbox), tmp_path / "out.mkv", toolbox)
+
+        before = self._properties(labelled_target, toolbox)
+        after = self._properties(out, toolbox)
+        assert after["track_name"] == before["track_name"] == "Blu-ray Remux"
+        assert after["language"] == before["language"] == "eng"
+
+    def test_nothing_is_invented_for_a_target_that_had_none(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """Supplying a default for something the target did not set would be
+        inventing metadata, which is the one thing this program never does."""
+        from hibrit.matroska import remux, video_track_properties
+
+        plain = tmp_path / "plain.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(plain), str(hdr10_clip)], check=False)
+        assert video_track_properties(plain, toolbox) == []
+
+        injected = DoviTool(toolbox).inject_rpu(hdr10_clip, synthetic_rpu, tmp_path / "dv.hevc")
+        out = remux(injected, probe(plain, toolbox), tmp_path / "out.mkv", toolbox)
+        assert not self._properties(out, toolbox).get("track_name")
+
+    def test_the_donor_s_other_tracks_and_chapters_still_come_across(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The half that already worked, asserted so a fix to the other half
+        cannot quietly break it."""
+        from hibrit.matroska import remux
+
+        audio = tmp_path / "tone.flac"
+        toolbox.run(
+            "ffmpeg",
+            [
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=10",
+                "-c:a",
+                "flac",
+                str(audio),
+            ],
+        )
+        chapters = tmp_path / "chapters.txt"
+        chapters.write_text(
+            "CHAPTER01=00:00:00.000\nCHAPTER01NAME=One\n"
+            "CHAPTER02=00:00:05.000\nCHAPTER02NAME=Two\n",
+            encoding="utf-8",
+        )
+        donor_path = tmp_path / "donor.mkv"
+        toolbox.run(
+            "mkvmerge",
+            [
+                "-q",
+                "-o",
+                str(donor_path),
+                str(hdr10_clip),
+                "--track-name",
+                "0:Turkish",
+                "--language",
+                "0:tur",
+                str(audio),
+                "--chapters",
+                str(chapters),
+            ],
+            check=False,
+        )
+
+        injected = DoviTool(toolbox).inject_rpu(hdr10_clip, synthetic_rpu, tmp_path / "dv.hevc")
+        out = remux(injected, probe(donor_path, toolbox), tmp_path / "out.mkv", toolbox)
+
+        payload = json.loads(toolbox.run("mkvmerge", ["-J", str(out)], check=False).stdout)
+        audio_tracks = [t for t in payload["tracks"] if t["type"] == "audio"]
+        assert len(audio_tracks) == 1
+        assert audio_tracks[0]["properties"]["track_name"] == "Turkish"
+        assert audio_tracks[0]["properties"]["language"] == "tur"
+        assert payload.get("chapters"), "the donor's chapters were dropped"
