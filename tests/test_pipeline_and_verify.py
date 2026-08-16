@@ -447,3 +447,100 @@ class TestStaleLabels:
         from hibrit.matroska import stale_label_warning
 
         assert stale_label_warning("Blu-ray Remux", self._result(dv=True, dv_profile=8)) is None
+
+
+class TestContainerFailures:
+    """The paths that fire when a tool goes wrong on a 70 GB file.
+
+    They are defensive, which is exactly why they need exercising: a defence
+    that has never run is a guess about what happens.
+    """
+
+    @staticmethod
+    def _box(returncode=0, stdout="", writes=None):
+        """A Toolbox whose run() does what the test needs and nothing else."""
+        import subprocess
+
+        class FakeBox:
+            def run(self, name, args, **kwargs):
+                if writes is not None:
+                    writes()
+                return subprocess.CompletedProcess(args, returncode, stdout, stdout)
+
+        return FakeBox()
+
+    def test_an_extraction_that_writes_nothing_is_an_error(self, tmp_path) -> None:
+        from conftest import make_info
+
+        from hibrit.matroska import ContainerError, extract_video
+
+        info = make_info(str(tmp_path / "in.mkv"))
+        with pytest.raises(ContainerError, match="no video stream"):
+            extract_video(info, tmp_path / "out.hevc", self._box())
+
+    def test_an_extraction_that_writes_an_empty_file_is_too(self, tmp_path) -> None:
+        """Worse than nothing: a zero-byte file looks like a result."""
+        from conftest import make_info
+
+        from hibrit.matroska import ContainerError, extract_video
+
+        out = tmp_path / "out.hevc"
+        info = make_info(str(tmp_path / "in.mkv"))
+        with pytest.raises(ContainerError):
+            extract_video(info, out, self._box(writes=lambda: out.write_bytes(b"")))
+
+    def test_a_raw_stream_is_handed_back_rather_than_copied(self, tmp_path) -> None:
+        """These files are the size of the films they came from."""
+        from conftest import make_info
+
+        from hibrit.matroska import extract_video
+
+        source = tmp_path / "already.hevc"
+        source.write_bytes(b"annex b")
+        info = make_info(str(source))
+        assert extract_video(info, tmp_path / "unused.hevc", self._box()) == source
+        assert not (tmp_path / "unused.hevc").exists()
+
+    def test_mkvmerge_exiting_two_is_a_failure_and_the_output_goes(self, tmp_path) -> None:
+        """Exit 1 is a warning worth ignoring; 2 is not, and a partial file left
+        behind would look like a result."""
+        from conftest import make_info
+
+        from hibrit.matroska import ContainerError, remux
+
+        out = tmp_path / "out.mkv"
+        box = self._box(
+            returncode=2, stdout="Error: something", writes=lambda: out.write_bytes(b"x")
+        )
+        with pytest.raises(ContainerError, match="mkvmerge failed"):
+            remux(tmp_path / "v.hevc", make_info(str(tmp_path / "d.mkv")), out, box)
+        assert not out.exists()
+
+    def test_mkvmerge_exiting_one_is_tolerated(self, tmp_path) -> None:
+        from conftest import make_info
+
+        from hibrit.matroska import remux
+
+        out = tmp_path / "out.mkv"
+        box = self._box(
+            returncode=1, stdout="Warning: reordered", writes=lambda: out.write_bytes(b"x")
+        )
+        assert remux(tmp_path / "v.hevc", make_info(str(tmp_path / "d.mkv")), out, box) == out
+
+    def test_the_track_id_falls_back_when_the_container_does_not_say(self) -> None:
+        """MediaInfo omits StreamOrder on some files; zero is the overwhelming
+        majority and a wrong guess surfaces immediately as a failed extraction,
+        not as a quiet mistake."""
+        from conftest import make_info
+
+        from hibrit.matroska import video_track_id
+
+        info = make_info("x.mkv")
+        object.__setattr__(info, "track", {})
+        assert video_track_id(info) == 0
+
+        object.__setattr__(info, "track", {"StreamOrder": "2"})
+        assert video_track_id(info) == 2
+
+        object.__setattr__(info, "track", {"StreamOrder": "not a number"})
+        assert video_track_id(info) == 0
