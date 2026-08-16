@@ -12,6 +12,7 @@ the tools parse.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from hibrit.probe import VideoInfo, probe
@@ -43,7 +44,13 @@ def video_track_id(info: VideoInfo) -> int:
         return 0
 
 
-def extract_video(source: Path | VideoInfo, out: Path, toolbox: Toolbox | None = None) -> Path:
+def extract_video(
+    source: Path | VideoInfo,
+    out: Path,
+    toolbox: Toolbox | None = None,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> Path:
     """Write *source*'s video track to *out* as an Annex B HEVC stream.
 
     A raw bitstream is returned as-is rather than copied; there is nothing to
@@ -54,13 +61,24 @@ def extract_video(source: Path | VideoInfo, out: Path, toolbox: Toolbox | None =
     if not is_wrapped(info.path):
         return info.path
 
-    box.run("mkvextract", [str(info.path), "tracks", f"{video_track_id(info)}:{out}"])
+    box.run(
+        "mkvextract",
+        [str(info.path), "tracks", f"{video_track_id(info)}:{out}"],
+        on_output=progress,
+    )
     if not out.exists() or out.stat().st_size == 0:
         raise ContainerError(f"mkvextract produced no video stream from {info.name}")
     return out
 
 
-def remux(video: Path, donor: VideoInfo, out: Path, toolbox: Toolbox | None = None) -> Path:
+def remux(
+    video: Path,
+    donor: VideoInfo,
+    out: Path,
+    toolbox: Toolbox | None = None,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> Path:
     """Combine a new video stream with every other track from *donor*.
 
     ``--no-video`` on the second input keeps the donor's audio, subtitles,
@@ -75,6 +93,7 @@ def remux(video: Path, donor: VideoInfo, out: Path, toolbox: Toolbox | None = No
         "mkvmerge",
         ["-o", str(out), str(video), "--no-video", str(donor.path)],
         check=False,
+        on_output=progress,
     )
     if proc.returncode >= 2:
         out.unlink(missing_ok=True)

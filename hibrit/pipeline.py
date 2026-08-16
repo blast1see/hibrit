@@ -17,6 +17,7 @@ that is not ``reliable`` stops the run.
 
 from __future__ import annotations
 
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -29,8 +30,15 @@ from hibrit.planner import Kind, Plan
 from hibrit.rpu import DoviTool
 from hibrit.tools import Toolbox
 
-#: Working space needed, as a multiple of the target file's size: the extracted
-#: stream, the injected stream, and the remuxed result can coexist briefly.
+#: Working space needed, as a multiple of the target file's size.
+#:
+#: Traced on a job that moves both kinds of metadata, where the peak is highest.
+#: The extracted target stream stays for the picture check; the HDR10+ pass
+#: writes a second copy beside it; the Dolby Vision pass writes a third before
+#: the second is deleted. That is three streams at once, and then the remuxed
+#: result alongside what remains. For a 72 GB target the peak measures about
+#: 208 GB, so three times over is the requirement with a little room, not a
+#: guess.
 SPACE_FACTOR = 3.0
 
 #: Callbacks. ``Progress`` is told what is happening; ``Approve`` is asked
@@ -68,6 +76,40 @@ class Result:
     hdr10plus: Path | None = None
     clean_target_stream: Path | None = None
     log: list[str] = field(default_factory=list)
+
+
+#: A percentage anywhere in a line of tool output. Matched on the digits and the
+#: sign rather than on a word: mkvmerge translates its messages, and on the
+#: machine this was written for it reports "İlerleme: 42%". A filter keyed to
+#: "Progress" would have passed every test written in English and dropped
+#: nothing here.
+_PERCENT = re.compile(r"(\d{1,3})\s*%")
+
+
+def throttle_progress(say: Progress, *, step: int = 10) -> Progress:
+    """Forward tool output, but thin out the percentage counters.
+
+    mkvextract prints a line per percent. Four such steps over a 70 GB remux is
+    four hundred lines of counting, which buries the handful of messages that
+    say what is actually happening. Only crossings of *step* percent get
+    through; everything else passes untouched.
+    """
+    last: int | None = None
+
+    def forward(line: str) -> None:
+        nonlocal last
+        match = _PERCENT.search(line)
+        if match is None:
+            say(line)
+            return
+        percent = int(match.group(1))
+        # The first reading always goes through, and a counter that has gone
+        # backwards means the next tool in the chain started at zero.
+        if last is None or percent < last or percent >= last + step:
+            last = percent
+            say(line)
+
+    return forward
 
 
 def free_space(path: Path) -> int:
@@ -161,6 +203,8 @@ def run(
         if progress is not None:
             progress(message)
 
+    tool_output = throttle_progress(say)
+
     if not skip_space_check:
         check_space(workdir, plan.target.path)
         say(f"working directory {workdir}: {free_space(workdir) / 2**30:.1f} GB free")
@@ -171,7 +215,10 @@ def run(
 
     # --- read the target's picture out of its container -------------------------
     say(f"extracting video stream from {target.name}")
-    target_stream = extract_video(target, workdir / "target.hevc", box)
+    # These four steps each rewrite the whole stream. On a 70 GB remux that is
+    # minutes apiece, and the tools do report their progress — swallowing it is
+    # what makes a working job look like a hung one.
+    target_stream = extract_video(target, workdir / "target.hevc", box, progress=tool_output)
 
     # --- read the source's metadata ---------------------------------------------
     rpu: Path | None = None
@@ -195,6 +242,8 @@ def run(
     if plan.needs_alignment:
         if alignment is None:
             say("measuring frame offset between source and target")
+            # align speaks for itself rather than through a tool, so its
+            # messages are not thinned.
             alignment = align(source, target, box, progress=say)
         else:
             say("using the offset measured earlier")
@@ -233,6 +282,7 @@ def run(
             hdr10plus,
             workdir / "with_hdr10plus.hevc",
             video_frames=target.frame_count,
+            progress=tool_output,
         )
         if current is not target_stream and not keep_intermediates:
             current.unlink(missing_ok=True)
@@ -240,14 +290,14 @@ def run(
 
     if rpu is not None:
         say("injecting Dolby Vision RPU")
-        injected = dovi.inject_rpu(current, rpu, workdir / "with_dv.hevc")
+        injected = dovi.inject_rpu(current, rpu, workdir / "with_dv.hevc", progress=tool_output)
         if current is not target_stream and not keep_intermediates:
             current.unlink(missing_ok=True)
         current = injected
 
     # --- put the container back together -------------------------------------------
     say(f"remuxing to {output}")
-    remux(current, target, output, box)
+    remux(current, target, output, box, progress=tool_output)
     if not keep_intermediates:
         current.unlink(missing_ok=True)
 
