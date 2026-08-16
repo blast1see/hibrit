@@ -242,3 +242,41 @@ class TestStandardRates:
         from hibrit.probe import snap_to_standard_rate
 
         assert snap_to_standard_rate(Fraction(2997, 125)) == Fraction(24000, 1001)
+
+
+class TestRoundedRationals:
+    """An exact-looking pair is not the same as an exact rate.
+
+    Found by probing all 302 remuxes and WEB-DLs on this machine rather than the
+    handful the fixtures were built from: one of them, Alien.1979.Directors.Cut,
+    reports FrameRate_Num 23976 / FrameRate_Den 1000. That is a rational, and it
+    is a rounding — 23.976000 where the real rate is 24000/1001 = 23.976024.
+    Trusting the pair because it was a pair was the mistake.
+    """
+
+    def test_the_pair_that_file_actually_reports(self) -> None:
+        video = dict(CASINO["media"]["track"][1])
+        video["FrameRate_Num"] = "23976"
+        video["FrameRate_Den"] = "1000"
+        video["FrameRate"] = "23.976"
+        assert parse_mediainfo(payload_exactly(video), HERE).frame_rate == Fraction(24000, 1001)
+
+    def test_a_correct_pair_is_untouched(self) -> None:
+        video = dict(CASINO["media"]["track"][1])
+        video["FrameRate_Num"] = "24000"
+        video["FrameRate_Den"] = "1001"
+        assert parse_mediainfo(payload_exactly(video), HERE).frame_rate == Fraction(24000, 1001)
+
+    def test_a_whole_number_pair_is_untouched(self) -> None:
+        video = dict(CASINO["media"]["track"][1])
+        video["FrameRate_Num"] = "25"
+        video["FrameRate_Den"] = "1"
+        assert parse_mediainfo(payload_exactly(video), HERE).frame_rate == Fraction(25)
+
+    def test_a_rate_far_from_any_standard_survives_as_given(self) -> None:
+        """Snapping moves a value by less than a thousandth. Anything genuinely
+        unusual — a timelapse, a GIF rip — is left as it is."""
+        video = dict(CASINO["media"]["track"][1])
+        video["FrameRate_Num"] = "15"
+        video["FrameRate_Den"] = "1"
+        assert parse_mediainfo(payload_exactly(video), HERE).frame_rate == Fraction(15)
