@@ -419,6 +419,143 @@ class TestRetiming:
         assert dovi.info(dovi.extract_rpu(out, tmp_path / "check.bin")).frames == FRAMES
 
 
+class TestRetimingThroughThePipeline:
+    """Both directions of the retiming, driven by the pipeline itself.
+
+    ``align()`` cannot measure an offset on this material and should not be
+    asked to — a clip cut at a metronomic rhythm gives a near-periodic signal
+    that it refuses, correctly. So the alignment is supplied rather than
+    measured, which is the same door the window uses after a person has
+    approved a figure, and leaves the correlation to the tests that use real
+    footage.
+    """
+
+    @staticmethod
+    def _pair(clip: Path, rpu_frames: int, toolbox, tmp_path: Path) -> tuple[Path, Path]:
+        """A source carrying *rpu_frames* of metadata, and a full-length target."""
+        config = tmp_path / f"gen{rpu_frames}.json"
+        config.write_text(json.dumps(_generate_config(rpu_frames)), encoding="utf-8")
+        rpu = tmp_path / f"rpu{rpu_frames}.bin"
+        toolbox.run("dovi_tool", ["generate", "-j", str(config), "-o", str(rpu)])
+
+        short_video = tmp_path / "short.hevc"
+        toolbox.run(
+            "ffmpeg",
+            [
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(clip),
+                "-map",
+                "0:v:0",
+                "-frames:v",
+                str(rpu_frames),
+                "-c",
+                "copy",
+                "-f",
+                "hevc",
+                str(short_video),
+            ],
+        )
+        source_stream = DoviTool(toolbox).inject_rpu(short_video, rpu, tmp_path / "src.hevc")
+
+        source_mkv = tmp_path / "source.mkv"
+        target_mkv = tmp_path / "target.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(source_mkv), str(source_stream)], check=False)
+        toolbox.run("mkvmerge", ["-q", "-o", str(target_mkv), str(clip)], check=False)
+        return source_mkv, target_mkv
+
+    @staticmethod
+    def _alignment(offset: int):
+        from hibrit.align import Alignment, Verdict
+
+        return Alignment(
+            offset=offset,
+            verdict=Verdict.RELIABLE,
+            confidence=9.0,
+            windows=(),
+            reason="supplied by the test",
+        )
+
+    @pytest.mark.parametrize(
+        ("offset", "expected_edit"),
+        [
+            (0, "duplicate"),  # source ends early: pad the tail
+            (-40, "duplicate"),  # source starts late: pad the head as well
+        ],
+    )
+    def test_short_metadata_is_padded_to_fit(
+        self, hdr10_clip, toolbox, tmp_path: Path, offset: int, expected_edit: str
+    ) -> None:
+        from hibrit.align import edit_config_for_offset
+        from hibrit.pipeline import run
+        from hibrit.planner import build_plan
+        from hibrit.verify import verify
+
+        short = FRAMES - 40
+        source_mkv, target_mkv = self._pair(hdr10_clip, short, toolbox, tmp_path)
+
+        config = edit_config_for_offset(offset, short, FRAMES)
+        assert expected_edit in config
+
+        plan = build_plan(probe(source_mkv, toolbox), probe(target_mkv, toolbox))
+        assert plan.needs_alignment
+
+        workdir = tmp_path / "work"
+        result = run(
+            plan,
+            tmp_path / "out.mkv",
+            workdir=workdir,
+            toolbox=toolbox,
+            alignment=self._alignment(offset),
+        )
+
+        # The whole point: the metadata now matches the video exactly, so the
+        # injection could not have been the padded-and-shrugged kind.
+        assert DoviTool(toolbox).info(result.rpu).frames == FRAMES
+
+        report = verify(
+            result.output,
+            target=target_mkv,
+            rpu=result.rpu,
+            clean_target_stream=result.clean_target_stream,
+            workdir=workdir,
+            toolbox=toolbox,
+        )
+        assert report.passed, report.describe()
+
+    def test_an_unusable_alignment_writes_nothing(
+        self, hdr10_clip, toolbox, tmp_path: Path
+    ) -> None:
+        """Supplying a measurement is not the same as overriding the verdict."""
+        from hibrit.align import Alignment, Verdict
+        from hibrit.pipeline import PipelineError, run
+        from hibrit.planner import build_plan
+
+        source_mkv, target_mkv = self._pair(hdr10_clip, FRAMES - 40, toolbox, tmp_path)
+        plan = build_plan(probe(source_mkv, toolbox), probe(target_mkv, toolbox))
+
+        refused = Alignment(
+            offset=-40,
+            verdict=Verdict.NO_MATCH,
+            confidence=1.02,
+            windows=(),
+            reason="not distinguishable from noise",
+        )
+        out = tmp_path / "out.mkv"
+        with pytest.raises(PipelineError, match="not accepted"):
+            run(
+                plan,
+                out,
+                workdir=tmp_path / "work",
+                toolbox=toolbox,
+                alignment=refused,
+            )
+        assert not out.exists()
+
+
 class TestContainer:
     def test_a_stream_survives_a_matroska_round_trip(
         self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path

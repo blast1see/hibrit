@@ -107,18 +107,31 @@ class TestRefusals:
         assert "different cut" in _blocker_texts(plan)
         assert "76 minutes" in _blocker_texts(plan)
 
-    def test_a_small_gap_on_a_short_clip_is_still_refused_but_readable(self) -> None:
-        """The gap has to be described in a unit that survives the scale.
+    def test_a_big_fraction_of_a_short_clip_is_not_a_different_cut(self) -> None:
+        """A percentage on its own is the wrong test.
 
-        20% of a thousand-frame clip is eight seconds. Printed as whole minutes
-        it reads "about 0 minutes", which sounds like a broken message rather
-        than a fact about the files.
+        200 frames is 20% of a thousand-frame clip and still only eight
+        seconds — a logo, not a different edit. Blocking on the fraction alone
+        refuses a job that is perfectly ordinary; the gap has to be large *and*
+        long enough to be structural.
         """
         source = make_info("a.mkv", dv=True, dv_profile=8, frames=1000)
         plan = build_plan(source, make_info("b.mkv", frames=800))
+        assert plan.ok
+        assert plan.needs_alignment
+
+    def test_a_gap_that_is_both_large_and_long_is_refused(self) -> None:
+        source = make_info("a.mkv", dv=True, dv_profile=8, frames=100_000)
+        plan = build_plan(source, make_info("b.mkv", frames=80_000))
         assert not plan.ok
-        assert "8.3 seconds" in _blocker_texts(plan)
-        assert "0 minutes" not in _blocker_texts(plan)
+        assert "14 minutes" in _blocker_texts(plan)
+
+    def test_a_long_gap_that_is_a_small_fraction_is_allowed(self) -> None:
+        """Two minutes of credits on a three-hour film is 1% and normal."""
+        source = make_info("a.mkv", dv=True, dv_profile=8, frames=260_000)
+        plan = build_plan(source, make_info("b.mkv", frames=257_000))
+        assert plan.ok
+        assert plan.needs_alignment
 
     def test_unhandled_dv_profile_is_refused(self) -> None:
         source = make_info("odd.mkv", dv=True, dv_profile=4, frames=1000)
