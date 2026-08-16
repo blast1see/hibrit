@@ -297,6 +297,77 @@ class TestEndToEnd:
         assert report.passed, report.describe()
         assert not report.unmeasured
 
+    def test_hdr10plus_into_a_dual_layer_dolby_vision_target(
+        self, media: Path, toolbox, tmp_path: Path
+    ) -> None:
+        """The second scenario this project was asked for, on the shape it
+        actually occurs in.
+
+        A UHD Blu-ray remux carries Dolby Vision profile 7 with a separate
+        enhancement layer, and sometimes lacks the HDR10+ a streaming release
+        has. So the target here is dual-layer profile 7 rather than the
+        single-layer 8.1 every other end-to-end test uses.
+
+        The ground truth is exact: the target is the source with its HDR10+
+        removed, so putting it back must reproduce the source's picture, its
+        HDR10+ and its untouched profile 7 RPU.
+        """
+        from hibrit.matroska import extract_video
+        from hibrit.pipeline import run
+        from hibrit.planner import Kind, build_plan
+        from hibrit.verify import picture_digest, verify
+
+        original = _need(media, "p7_ff.hevc")
+        h10p = Hdr10PlusTool(toolbox)
+        dovi = DoviTool(toolbox)
+
+        stripped = h10p.remove(original, tmp_path / "no_hdr10plus.hevc")
+        source_mkv = tmp_path / "source.mkv"
+        target_mkv = tmp_path / "target.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(source_mkv), str(original)], check=False)
+        toolbox.run("mkvmerge", ["-q", "-o", str(target_mkv), str(stripped)], check=False)
+
+        source = probe(source_mkv, toolbox)
+        target = probe(target_mkv, toolbox)
+        assert source.has_hdr10plus and source.has_dv and source.is_dual_layer
+        assert target.has_dv and target.is_dual_layer and not target.has_hdr10plus
+
+        plan = build_plan(source, target)
+        # Only HDR10+ moves: the target's own Dolby Vision is left alone.
+        assert plan.transfer == (Kind.HDR10PLUS,)
+        assert plan.convert_mode is None
+
+        workdir = tmp_path / "work"
+        result = run(plan, tmp_path / "out.mkv", workdir=workdir, toolbox=toolbox)
+
+        report = verify(
+            result.output,
+            target=target_mkv,
+            hdr10plus=result.hdr10plus,
+            clean_target_stream=result.clean_target_stream,
+            workdir=workdir,
+            toolbox=toolbox,
+        )
+        assert report.passed, report.describe()
+
+        # Against the file that had both to begin with, which is the strongest
+        # statement available: same picture, same HDR10+, same profile 7 RPU.
+        produced = extract_video(result.output, tmp_path / "out.hevc", toolbox)
+        assert picture_digest(produced) == picture_digest(original)
+        assert sha256_file(h10p.extract(produced, tmp_path / "back.json")) == sha256_file(
+            h10p.extract(original, tmp_path / "orig.json")
+        )
+        assert sha256_file(dovi.extract_rpu(produced, tmp_path / "back.bin")) == sha256_file(
+            dovi.extract_rpu(original, tmp_path / "orig.bin")
+        )
+
+        # And the whole-file hashes differ, which is why the picture check
+        # compares picture units rather than files.
+        assert sha256_file(produced) != sha256_file(original)
+
+        after = probe(result.output, toolbox)
+        assert after.has_hdr10plus and after.has_dv and after.is_dual_layer
+
 
 class TestProbeReadsRealFiles:
     def test_reads_dolby_vision_and_hdr10plus_together(self, media: Path, toolbox) -> None:
