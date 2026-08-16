@@ -238,9 +238,10 @@ def build_plan(
                     Level.WARNING,
                     "source is Dolby Vision profile 5, whose base layer is IPT-PQ-C2, "
                     "not the BT.2020 PQ picture in the target. Converting with -m 3 "
-                    "keeps the trims but drops the colour mapping, and some players "
-                    "reject a profile 5 RPU sitting on an HDR10 base outright. Check "
-                    "the result on the device you actually watch on.",
+                    "keeps every trim and every mapping curve and rewrites the colour "
+                    "space they are interpreted in — so the numbers survive and their "
+                    "meaning changes. Some players also reject a profile 5 grade on an "
+                    "HDR10 base outright. Check the result on the device you watch on.",
                 )
             )
         elif profile == 7:
