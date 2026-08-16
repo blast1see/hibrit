@@ -661,6 +661,149 @@ class TestRetimingThroughThePipeline:
         assert not (workdir / "target.hevc").exists()
 
 
+class TestHdr10PlusRetiming:
+    """The half of the retiming nothing had ever run.
+
+    Every retiming test moved Dolby Vision only, so ``Hdr10PlusTool.editor``
+    was reached from exactly one place — ``pipeline._retime`` — and no test
+    went through it. That is the shape the dead mismatch guard had: written,
+    plausible, never executed. The guide asserted that hdr10plus_tool "uses the
+    same JSON schema", which came from reading rather than from running it.
+    """
+
+    def test_the_editor_takes_the_same_config_dovi_tool_does(
+        self, synthetic_hdr10plus, toolbox, tmp_path: Path
+    ) -> None:
+        tool = Hdr10PlusTool(toolbox)
+        trimmed = tool.editor(
+            synthetic_hdr10plus, {"remove": ["0-39"]}, tmp_path / "cut.json", workdir=tmp_path
+        )
+        assert read_json(trimmed).frames == FRAMES - 40
+
+        padded = tool.editor(
+            synthetic_hdr10plus,
+            {"duplicate": [{"source": 0, "offset": 0, "length": 60}]},
+            tmp_path / "pad.json",
+            workdir=tmp_path,
+        )
+        assert read_json(padded).frames == FRAMES + 60
+
+    def test_the_retimed_metadata_then_injects_without_a_refusal(
+        self, hdr10_clip, synthetic_hdr10plus, toolbox, tmp_path: Path
+    ) -> None:
+        """The point of retiming: metadata that did not fit, made to.
+
+        Trimming 40 frames off a 240-frame set gives 200, which the guard
+        refuses against a 240-frame video. Padding it back to 240 is accepted —
+        so the edit is doing what the pipeline needs it to, not merely running.
+        """
+        tool = Hdr10PlusTool(toolbox)
+        short = tool.editor(
+            synthetic_hdr10plus, {"remove": ["0-39"]}, tmp_path / "short.json", workdir=tmp_path
+        )
+        with pytest.raises(Hdr10PlusMismatch):
+            tool.inject(hdr10_clip, short, tmp_path / "bad.hevc", video_frames=FRAMES)
+
+        fitted = tool.editor(
+            short,
+            {"duplicate": [{"source": 0, "offset": 0, "length": 40}]},
+            tmp_path / "fitted.json",
+            workdir=tmp_path,
+        )
+        assert read_json(fitted).frames == FRAMES
+        out = tool.inject(hdr10_clip, fitted, tmp_path / "ok.hevc", video_frames=FRAMES)
+        assert read_json(tool.extract(out, tmp_path / "back.json")).frames == FRAMES
+
+    def test_both_kinds_retime_together_through_the_pipeline(
+        self, hdr10_clip, synthetic_rpu, synthetic_hdr10plus, toolbox, tmp_path: Path
+    ) -> None:
+        """A source carrying both, shorter than its target, run end to end.
+
+        This is the path _retime edits two files on, and until now it had only
+        ever edited one.
+        """
+        from hibrit.align import Alignment, Verdict
+        from hibrit.pipeline import run
+        from hibrit.planner import Kind, build_plan
+        from hibrit.verify import verify
+
+        short = FRAMES - 40
+        dovi = DoviTool(toolbox)
+        h10p = Hdr10PlusTool(toolbox)
+
+        # A source with both kinds, forty frames shorter than the target.
+        clipped = tmp_path / "short.hevc"
+        toolbox.run(
+            "ffmpeg",
+            [
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(hdr10_clip),
+                "-map",
+                "0:v:0",
+                "-frames:v",
+                str(short),
+                "-c",
+                "copy",
+                "-f",
+                "hevc",
+                str(clipped),
+            ],
+        )
+        short_rpu = dovi.editor(
+            synthetic_rpu,
+            {"remove": [f"{short}-{FRAMES - 1}"]},
+            tmp_path / "r.bin",
+            workdir=tmp_path,
+        )
+        short_meta = h10p.editor(
+            synthetic_hdr10plus,
+            {"remove": [f"{short}-{FRAMES - 1}"]},
+            tmp_path / "m.json",
+            workdir=tmp_path,
+        )
+        step = h10p.inject(clipped, short_meta, tmp_path / "a.hevc", video_frames=short)
+        both = dovi.inject_rpu(step, short_rpu, tmp_path / "b.hevc")
+
+        source_mkv = tmp_path / "source.mkv"
+        target_mkv = tmp_path / "target.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(source_mkv), str(both)], check=False)
+        toolbox.run("mkvmerge", ["-q", "-o", str(target_mkv), str(hdr10_clip)], check=False)
+
+        plan = build_plan(probe(source_mkv, toolbox), probe(target_mkv, toolbox))
+        assert set(plan.transfer) == {Kind.DV, Kind.HDR10PLUS}
+        assert plan.needs_alignment
+
+        workdir = tmp_path / "work"
+        result = run(
+            plan,
+            tmp_path / "out.mkv",
+            workdir=workdir,
+            toolbox=toolbox,
+            alignment=Alignment(
+                offset=0, verdict=Verdict.RELIABLE, confidence=9.0, windows=(), reason="supplied"
+            ),
+        )
+
+        # Both were stretched to the target's length, not one of them.
+        assert dovi.info(result.rpu).frames == FRAMES
+        assert read_json(result.hdr10plus).frames == FRAMES
+
+        report = verify(
+            result.output,
+            target=target_mkv,
+            rpu=result.rpu,
+            hdr10plus=result.hdr10plus,
+            clean_target_stream=result.clean_target_stream,
+            workdir=workdir,
+            toolbox=toolbox,
+        )
+        assert report.passed, report.describe()
+
+
 class TestContainer:
     def test_a_stream_survives_a_matroska_round_trip(
         self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
