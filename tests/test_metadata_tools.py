@@ -98,6 +98,52 @@ class TestHdr10PlusJson:
         assert h10p.read_json(path).profile == "B"
 
 
+class TestHdr10PlusComparison:
+    """Comparing per-frame metadata without materialising it twice."""
+
+    @staticmethod
+    def _scene(index: int, average: int = 5) -> dict:
+        return {
+            "SequenceFrameIndex": index,
+            "SceneFrameIndex": index,
+            "SceneId": index // 10,
+            "LuminanceParameters": {"AverageRGB": average},
+        }
+
+    def test_identical_payloads_match(self) -> None:
+        from hibrit.verify import _payloads_match
+
+        left = [self._scene(i) for i in range(50)]
+        right = [self._scene(i) for i in range(50)]
+        assert _payloads_match(left, right) is None
+
+    def test_derived_bookkeeping_is_ignored(self) -> None:
+        """The tool recomputes SceneId and SceneFrameIndex on extraction, so a
+        difference there is not a difference in the metadata."""
+        from hibrit.verify import _payloads_match
+
+        left = [self._scene(i) for i in range(50)]
+        right = [{**self._scene(i), "SceneId": 0, "SceneFrameIndex": 0} for i in range(50)]
+        assert _payloads_match(left, right) is None
+
+    def test_a_real_difference_is_located(self) -> None:
+        from hibrit.verify import _payloads_match
+
+        left = [self._scene(i) for i in range(50)]
+        right = [self._scene(i) for i in range(50)]
+        right[37]["LuminanceParameters"] = {"AverageRGB": 999}
+        assert _payloads_match(left, right) == 37
+
+    def test_mismatched_lengths_raise_rather_than_stopping_early(self) -> None:
+        """Walking to the end of the shorter list would call a truncated
+        metadata stream a match — the failure this project is built around."""
+        from hibrit.verify import _payloads_match
+
+        left = [self._scene(i) for i in range(50)]
+        with pytest.raises(ValueError):
+            _payloads_match(left, left[:30])
+
+
 class TestInjectGuard:
     def test_refuses_before_running_when_the_count_is_known(self, tmp_path) -> None:
         """The point of the pre-check: fail in a second, not after 68 GB."""

@@ -168,12 +168,17 @@ hibrit gui
 
 ## Disk
 
-A 70 GB target needs its video stream extracted, injected into, and remuxed:
-roughly three times the target's size in working space before anything is
-deleted. `--workdir` is required rather than defaulted for exactly this reason —
-the drive holding your sources is usually the one without the room. hibrit
-checks free space before running the first command and deletes each intermediate
-as soon as the next step has consumed it.
+A target needs its video stream extracted, injected into, and remuxed, and when
+both kinds of metadata move there are three streams on disk at once before the
+remux joins them. Traced on a 72 GB remux, the peak comes to about 208 GB — so
+**three times the target's size** is the requirement.
+
+`--workdir` is required rather than defaulted for exactly this reason: the drive
+holding your sources is usually the one without the room. On the machine this
+was written for, a 72 GB job is refused on both the source drive (42 GB free)
+and the system drive (193 GB), and accepted on the one with space. Free space is
+checked before the first command runs, and each intermediate is deleted as soon
+as the next step has consumed it.
 
 ## The failure nothing here can catch
 
