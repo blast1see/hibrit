@@ -48,8 +48,15 @@ jobs:
       # third-party releases and the media is tens of gigabytes of films. They
       # run on the developer's machine, and the README says so rather than
       # letting a green tick imply they ran.
+      #
+      # Hence the lower coverage bar. Everything that shells out to dovi_tool or
+      # ffmpeg is unreachable from this tier by construction, so enforcing the
+      # project's real gate (80%, see pyproject.toml) here would only be
+      # satisfiable by mocking the subprocesses — which would test the mocks.
+      # This number exists to catch a module going dark, not to certify the
+      # suite. The measured figure for this tier is 66%.
       - name: Unit tests
-        run: pytest -q -m "not tools and not real" --cov=hibrit
+        run: pytest -q -m "not tools and not real" --cov=hibrit --cov-fail-under=60
 
       - name: The package imports and answers for itself
         run: python -m hibrit --version

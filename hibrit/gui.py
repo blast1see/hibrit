@@ -19,7 +19,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from hibrit import __version__
 from hibrit.align import Alignment, align
-from hibrit.pipeline import NotEnoughSpace, free_space, run
+from hibrit.pipeline import SPACE_FACTOR, NotEnoughSpace, free_space, run
 from hibrit.planner import Level, Plan, build_plan
 from hibrit.probe import VideoInfo, probe
 from hibrit.tools import Toolbox
@@ -32,6 +32,16 @@ NOTE_COLOURS = {
     Level.WARNING: "#a86300",
     Level.INFO: "#4a4a4a",
 }
+
+
+def _gigabytes(size: int | float) -> str:
+    """Sizes here span a test clip and a 70 GB remux, so the precision moves.
+
+    Rounding a 112 MB clip to whole gigabytes prints "0 GB", which reads as a
+    bug rather than as a small file.
+    """
+    gb = size / 2**30
+    return f"{gb:.2f} GB" if gb < 10 else f"{gb:.0f} GB"
 
 
 class App(ttk.Frame):
@@ -65,14 +75,28 @@ class App(ttk.Frame):
 
     def _build(self) -> None:
         row = 0
-        row = self._file_row(row, "Source (has the metadata)", self.source_path, self._pick_source)
-        row = self._file_row(row, "Target (keeps its picture)", self.target_path, self._pick_target)
+        row = self._file_row(
+            row,
+            "Source (has the metadata)",
+            self.source_path,
+            self._pick_source,
+            on_commit=self._reprobe,
+        )
+        row = self._file_row(
+            row,
+            "Target (keeps its picture)",
+            self.target_path,
+            self._pick_target,
+            on_commit=self._reprobe,
+        )
 
         work = ttk.Frame(self)
         work.grid(row=row, column=0, sticky="ew", pady=(8, 0))
         work.columnconfigure(1, weight=1)
         ttk.Label(work, text="Working directory").grid(row=0, column=0, sticky="w")
-        ttk.Entry(work, textvariable=self.workdir_path).grid(row=0, column=1, sticky="ew", padx=6)
+        work_entry = ttk.Entry(work, textvariable=self.workdir_path)
+        work_entry.grid(row=0, column=1, sticky="ew", padx=6)
+        work_entry.bind("<FocusOut>", lambda _event: self._show_space())
         ttk.Button(work, text="Browse", command=self._pick_workdir).grid(row=0, column=2)
         ttk.Label(work, textvariable=self.space_label, foreground="#4a4a4a").grid(
             row=1, column=1, sticky="w", padx=6
@@ -80,6 +104,12 @@ class App(ttk.Frame):
         row += 1
 
         row = self._file_row(row, "Output file", self.output_path, self._pick_output)
+
+        # The Run button depends on these two being filled in, so it has to
+        # notice them being filled in. Without the traces, typing a valid path
+        # leaves the button greyed out and says nothing about why.
+        self.output_path.trace_add("write", lambda *_: self._refresh_run_button())
+        self.workdir_path.trace_add("write", lambda *_: self._refresh_run_button())
 
         # --- plan ---------------------------------------------------------------
         plan_frame = ttk.LabelFrame(self, text="Plan", padding=8)
@@ -145,13 +175,23 @@ class App(ttk.Frame):
         self.log_text.tag_configure("fail", foreground=NOTE_COLOURS[Level.BLOCKER])
         self.log_text.tag_configure("pass", foreground="#1a6b2a")
 
-    def _file_row(self, row: int, label: str, variable: tk.StringVar, command) -> int:
+    def _file_row(
+        self, row: int, label: str, variable: tk.StringVar, command, *, on_commit=None
+    ) -> int:
         frame = ttk.Frame(self)
         frame.grid(row=row, column=0, sticky="ew", pady=(4, 0))
         frame.columnconfigure(1, weight=1)
         ttk.Label(frame, text=label, width=26).grid(row=0, column=0, sticky="w")
-        ttk.Entry(frame, textvariable=variable).grid(row=0, column=1, sticky="ew", padx=6)
+        entry = ttk.Entry(frame, textvariable=variable)
+        entry.grid(row=0, column=1, sticky="ew", padx=6)
         ttk.Button(frame, text="Browse", command=command).grid(row=0, column=2)
+
+        # A path typed or pasted into the box has to work as well as one chosen
+        # from the dialog. Probing on every keystroke would run mediainfo on
+        # half-typed paths, so it happens when the field is committed instead.
+        if on_commit is not None:
+            entry.bind("<Return>", lambda _event: on_commit())
+            entry.bind("<FocusOut>", lambda _event: on_commit())
         return row + 1
 
     # -- pickers --------------------------------------------------------------
@@ -189,12 +229,13 @@ class App(ttk.Frame):
         if not directory:
             self.space_label.set("")
             return
-        available = free_space(Path(directory)) / 2**30
+        available = free_space(Path(directory))
         need = ""
-        if self.target_info is not None:
-            required = self.target_info.path.stat().st_size * 3 / 2**30
-            need = f"; this job needs about {required:.0f} GB"
-        self.space_label.set(f"{available:.0f} GB free{need}")
+        if self.target_info is not None and self.target_info.path.exists():
+            required = self.target_info.path.stat().st_size * SPACE_FACTOR
+            verdict = "" if available >= required else "  — NOT ENOUGH"
+            need = f"; this job needs about {_gigabytes(required)}{verdict}"
+        self.space_label.set(f"{_gigabytes(available)} free{need}")
 
     # -- planning -------------------------------------------------------------
 

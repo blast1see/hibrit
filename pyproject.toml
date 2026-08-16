@@ -44,8 +44,18 @@ markers = [
 [tool.coverage.run]
 branch = true
 relative_files = true
+omit = [
+    # The window needs a display and a person. It is exercised by hand against
+    # real files before a release; counting it here would either force a pile of
+    # widget assertions that prove nothing, or drag the number down far enough
+    # that the gate stops meaning anything.
+    "hibrit/gui.py",
+]
 
 [tool.coverage.report]
+# This is the gate for the *whole* suite, which is what runs on a machine with
+# the binaries and the media. CI can only run the first tier and passes its own,
+# lower --cov-fail-under; see .github/workflows/ci.yml for why.
 fail_under = 80
 show_missing = true
 skip_covered = true

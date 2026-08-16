@@ -1,11 +1,16 @@
 """Discovery and invocation of the external binaries hibrit drives.
 
 hibrit never installs anything system-wide. Binaries are looked up in this
-order:
+order, most specific first:
 
 1. an explicit path passed by the caller
-2. the ``tools/`` directory next to the package (or next to the frozen exe)
-3. ``PATH``
+2. any directory the caller named (``--tools-dir``)
+3. the ``tools/`` directory next to the package (or next to the frozen exe)
+4. ``PATH``
+
+Someone who passes ``--tools-dir`` is pointing at a particular build for a
+reason — a newer dovi_tool, a debug build — so that directory outranks the
+bundled default rather than being a fallback for it.
 
 Nothing here silently falls back to a different binary: if a tool is missing,
 the caller gets a :class:`MissingTool` error naming it.
@@ -98,7 +103,7 @@ class Toolbox:
         extra_dirs: Iterable[Path] = (),
     ) -> None:
         self._overrides = {k: Path(v) for k, v in (overrides or {}).items()}
-        self._search_dirs = [bundled_tools_dir(), *extra_dirs]
+        self._search_dirs = [*extra_dirs, bundled_tools_dir()]
         self._cache: dict[str, Path | None] = {}
 
     def find(self, name: str) -> Path | None:

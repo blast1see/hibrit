@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import shot_curve
+from conftest import make_info, shot_curve
 
 from hibrit.align import (
     CONFIDENCE_RELIABLE,
     Verdict,
+    align,
     correlate,
     cut_signal,
     edit_config_for_offset,
@@ -122,6 +123,107 @@ class TestEditConfig:
 
     def test_identical_lengths_need_no_edit(self) -> None:
         assert edit_config_for_offset(0, source_frames=500, target_frames=500) == {}
+
+
+class TestAlign:
+    """The decision layer, with decoding replaced by a known signal.
+
+    ``align()`` is where the refusals live, and they are pure logic once the
+    luma curves exist. Driving it with synthetic curves lets the refusals be
+    checked in milliseconds on a machine with no media and no ffmpeg — the real
+    footage versions live in ``test_real.py``.
+    """
+
+    @staticmethod
+    def _patch_curves(monkeypatch, curve_a, curve_b) -> None:
+        def fake(info, toolbox, *, start_frame=0, frames=None, **_kwargs):
+            source = curve_a if info.name == "a.mkv" else curve_b
+            window = source[start_frame:]
+            return window[:frames] if frames is not None else window
+
+        monkeypatch.setattr("hibrit.align.luma_curve", fake)
+
+    def test_agreeing_windows_are_reliable(self, monkeypatch) -> None:
+        base = shot_curve(30_000, seed=5)
+        offset = 137
+        self._patch_curves(monkeypatch, base, base[offset:])
+
+        result = align(
+            make_info("a.mkv", frames=30_000),
+            make_info("b.mkv", frames=30_000 - offset),
+            toolbox=None,
+            windows=2,
+        )
+        assert result.verdict is Verdict.RELIABLE
+        assert result.offset == offset
+        assert len(result.windows) == 2
+
+    def test_windows_that_disagree_produce_a_refusal_not_an_average(self, monkeypatch) -> None:
+        """Two different offsets mean no single offset exists. Averaging them
+        would produce a number that is wrong in both places."""
+        base = shot_curve(30_000, seed=6)
+        # Head shifted by 100, tail by 400: the releases differ structurally.
+        spliced = np.concatenate([base[100:12_000], base[12_400:]])
+        self._patch_curves(monkeypatch, base, spliced)
+
+        result = align(
+            make_info("a.mkv", frames=30_000),
+            make_info("b.mkv", frames=spliced.size),
+            toolbox=None,
+            windows=2,
+        )
+        assert result.verdict is Verdict.NO_MATCH
+        assert result.offset is None
+        assert "disagree" in result.reason
+
+    def test_unrelated_content_is_refused(self, monkeypatch) -> None:
+        """Two films give two windows two unrelated answers, so the refusal
+        arrives as a disagreement rather than as a weak peak. Either route is
+        correct; what matters is that no offset comes back."""
+        self._patch_curves(monkeypatch, shot_curve(30_000, seed=7), shot_curve(30_000, seed=8))
+        result = align(
+            make_info("a.mkv", frames=30_000),
+            make_info("b.mkv", frames=30_000),
+            toolbox=None,
+        )
+        assert result.verdict is Verdict.NO_MATCH
+        assert result.offset is None
+
+    def test_a_single_window_still_refuses_a_weak_peak(self, monkeypatch) -> None:
+        """With only one window there is nothing to disagree with, so the
+        confidence threshold has to carry the refusal on its own."""
+        self._patch_curves(monkeypatch, shot_curve(30_000, seed=7), shot_curve(30_000, seed=8))
+        result = align(
+            make_info("a.mkv", frames=30_000),
+            make_info("b.mkv", frames=30_000),
+            toolbox=None,
+            windows=1,
+        )
+        assert not result.usable
+        assert "noise floor" in result.reason
+
+    def test_an_offset_at_the_edge_of_the_search_is_not_an_answer(self, monkeypatch) -> None:
+        """The bug this caught: a search too narrow to contain the real offset
+        returned the wall of the search range as though it were a measurement."""
+        base = shot_curve(30_000, seed=9)
+        self._patch_curves(monkeypatch, base, base[2_000:])
+        result = align(
+            make_info("a.mkv", frames=30_000),
+            make_info("b.mkv", frames=28_000),
+            toolbox=None,
+            max_shift=200,
+        )
+        assert not result.usable
+
+    def test_unknown_frame_count_stops_before_decoding_anything(self) -> None:
+        result = align(
+            make_info("a.mkv", frames=None),
+            make_info("b.mkv", frames=1000),
+            toolbox=None,
+        )
+        assert result.verdict is Verdict.NO_MATCH
+        assert result.windows == ()
+        assert "frame count unknown" in result.reason
 
 
 class TestVerdict:
