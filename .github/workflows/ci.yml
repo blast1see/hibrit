@@ -47,9 +47,10 @@ jobs:
       # second. That is cheap enough for a runner, and without it every line
       # that shells out would be covered on one developer's machine only.
       #
-      # Installed from the projects' own releases rather than a packaging
-      # action, pinned so a run that passes today passes tomorrow. This is the
-      # part nobody notices has stopped working.
+      # Installed on both platforms rather than Linux alone, because Windows is
+      # where this is actually used and where a path with a space in it goes
+      # wrong. Versions are pinned so a run that passes today passes tomorrow;
+      # this is the part nobody notices has stopped working.
       - name: dovi_tool and hdr10plus_tool (Linux)
         if: runner.os == 'Linux'
         env:
@@ -72,13 +73,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg mkvtoolnix mediainfo
 
+      - name: dovi_tool and hdr10plus_tool (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          DOVI_TOOL_VERSION: "2.3.3"
+          HDR10PLUS_TOOL_VERSION: "1.7.2"
+        run: |
+          New-Item -ItemType Directory -Force tools | Out-Null
+          $base = "https://github.com/quietvoid"
+          $jobs = @(
+            "$base/dovi_tool/releases/download/$env:DOVI_TOOL_VERSION/dovi_tool-$env:DOVI_TOOL_VERSION-x86_64-pc-windows-msvc.zip",
+            "$base/hdr10plus_tool/releases/download/$env:HDR10PLUS_TOOL_VERSION/hdr10plus_tool-$env:HDR10PLUS_TOOL_VERSION-x86_64-pc-windows-msvc.zip"
+          )
+          foreach ($url in $jobs) {
+            $zip = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileName($url))
+            Invoke-WebRequest -Uri $url -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath tools -Force
+          }
+          Get-ChildItem tools
+
+      - name: ffmpeg, mkvtoolnix and mediainfo (Windows)
+        if: runner.os == 'Windows'
+        # ffmpeg-full, not ffmpeg: the synthetic clip needs libx265 with 10-bit
+        # support, which the essentials build leaves out.
+        run: choco install ffmpeg-full mkvtoolnix mediainfo-cli -y --no-progress
+
       - run: pip install -e ".[dev]"
 
       - name: What this runner can do
         run: python -m hibrit doctor
-        # Windows installs nothing, so doctor reports what is missing and the
-        # tools tier skips itself. That is the intended outcome, not a failure.
-        continue-on-error: true
 
       # The `real` tier stays out: it needs tens of gigabytes of films. It runs
       # on the developer's machine, and the README says so rather than letting a
