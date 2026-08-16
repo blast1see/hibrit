@@ -923,3 +923,53 @@ class TestPipelineEndToEnd:
 
         with pytest.raises(pipeline.NotEnoughSpace):
             pipeline.run(plan, tmp_path / "out.mkv", workdir=tmp_path / "w", toolbox=toolbox)
+
+
+class TestSkipReorder:
+    """A flag that existed, could not be reached, and would have failed.
+
+    ``extract`` took a *skip_validation* argument that passed
+    ``--skip-validation``. hdr10plus_tool 1.7.2 answers that with
+    ``error: unexpected argument '--skip-validation' found``. Nothing in the
+    program could reach it, so nobody found out — an invented flag is the same
+    failure as invented output: plausible, unrun, wrong.
+
+    The real one is ``--skip-reorder``, which the tool describes as a
+    workaround for misauthored HEVC files.
+    """
+
+    def test_the_flag_the_tool_actually_has(
+        self, hdr10_clip, synthetic_hdr10plus, toolbox, tmp_path: Path
+    ) -> None:
+        tool = Hdr10PlusTool(toolbox)
+        injected = tool.inject(hdr10_clip, synthetic_hdr10plus, tmp_path / "h.hevc")
+
+        plain = tool.extract(injected, tmp_path / "plain.json")
+        skipped = tool.extract(injected, tmp_path / "skipped.json", skip_reorder=True)
+
+        assert read_json(plain).frames == FRAMES
+        assert read_json(skipped).frames == FRAMES
+
+    def test_the_invented_flag_would_have_been_rejected(self, hdr10_clip, toolbox) -> None:
+        """Kept as evidence rather than as a story: this is what the old code
+        would have produced the first time anyone reached it."""
+        from hibrit.tools import ToolFailed
+
+        with pytest.raises(ToolFailed) as caught:
+            toolbox.run(
+                "hdr10plus_tool",
+                ["extract", "--skip-validation", str(hdr10_clip), "-o", "nowhere.json"],
+            )
+        assert "unexpected argument" in str(caught.value)
+
+    def test_a_file_with_no_hdr10plus_fails_rather_than_writing_nothing(
+        self, hdr10_clip, toolbox, tmp_path: Path
+    ) -> None:
+        """The other way extraction ends. It exits 1 and writes no file, so the
+        wrapper raises instead of handing back a path to something absent."""
+        from hibrit.tools import ToolFailed
+
+        out = tmp_path / "none.json"
+        with pytest.raises(ToolFailed):
+            Hdr10PlusTool(toolbox).extract(hdr10_clip, out)
+        assert not out.exists()

@@ -92,12 +92,24 @@ class Hdr10PlusTool:
     def __init__(self, toolbox: Toolbox | None = None) -> None:
         self.box = toolbox or Toolbox()
 
-    def extract(self, source: Path, out: Path, *, skip_validation: bool = False) -> Path:
-        """Extract HDR10+ metadata to JSON from an HEVC or Matroska file."""
-        args: list[str] = []
-        if skip_validation:
-            args.append("--skip-validation")
-        args += ["extract", str(source), "-o", str(out)]
+    def extract(self, source: Path, out: Path, *, skip_reorder: bool = False) -> Path:
+        """Extract HDR10+ metadata to JSON from an HEVC or Matroska file.
+
+        *skip_reorder* passes ``--skip-reorder``, which hdr10plus_tool
+        describes as a workaround for misauthored HEVC files. It normally
+        reorders the metadata to match display order, and on a stream whose
+        frame ordering it cannot follow that step is what fails.
+
+        This parameter used to be called *skip_validation* and passed
+        ``--skip-validation``, which does not exist: the tool answers
+        ``error: unexpected argument '--skip-validation' found``. Nothing
+        reached it, so nobody found out. Invented flags are the same failure as
+        invented output — plausible, unrun, wrong.
+        """
+        args: list[str] = ["extract"]
+        if skip_reorder:
+            args.append("--skip-reorder")
+        args += [str(source), "-o", str(out)]
         self.box.run("hdr10plus_tool", args)
         return out
 

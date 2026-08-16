@@ -188,6 +188,7 @@ def run(
     keep_intermediates: bool = False,
     keep_clean_stream: bool = True,
     skip_space_check: bool = False,
+    skip_reorder: bool = False,
 ) -> Result:
     """Execute *plan*, writing the finished Matroska file to *output*.
 
@@ -239,6 +240,7 @@ def run(
             alignment=alignment,
             keep_intermediates=keep_intermediates,
             keep_clean_stream=keep_clean_stream,
+            skip_reorder=skip_reorder,
             log=log,
         )
     except BaseException:
@@ -266,6 +268,7 @@ def _execute(
     alignment: Alignment | None,
     keep_intermediates: bool,
     keep_clean_stream: bool,
+    skip_reorder: bool,
     log: list[str],
 ) -> Result:
     """The steps themselves. Split out so :func:`run` can report what a failure
@@ -320,7 +323,9 @@ def _execute(
 
     if Kind.HDR10PLUS in plan.transfer:
         say("extracting HDR10+ metadata")
-        hdr10plus = hdr10plus_tool.extract(source.path, workdir / "hdr10plus.json")
+        hdr10plus = hdr10plus_tool.extract(
+            source.path, workdir / "hdr10plus.json", skip_reorder=skip_reorder
+        )
         say(f"HDR10+: {read_json(hdr10plus).describe()}")
 
     # --- retime the metadata to the offset settled above --------------------------
