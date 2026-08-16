@@ -195,7 +195,7 @@ def run(
     if plan.needs_alignment:
         if alignment is None:
             say("measuring frame offset between source and target")
-            alignment = align(source, target, box)
+            alignment = align(source, target, box, progress=say)
         else:
             say("using the offset measured earlier")
         say(alignment.describe())

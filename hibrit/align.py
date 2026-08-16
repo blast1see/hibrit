@@ -7,8 +7,14 @@ wrong for its entire runtime.
 
 The measurement is the video equivalent of what AudioSyncTool does with audio:
 reduce both sources to a cheap one-dimensional signal, cross-correlate, and read
-the lag. Decoding 4K HEVC to 128x72 grayscale runs at roughly 250 fps, so a
-9000-frame window costs about half a minute per file.
+the lag.
+
+Decoding 4K HEVC to 128x72 grayscale runs at roughly 200 frames per second.
+Measured end to end on a 223,615-frame UHD remux at the default settings — two
+windows of 11,180 frames plus a 2,236-frame search margin, decoded from both
+files — the whole measurement took four and a half minutes. It is the slowest
+thing hibrit does, and the only one a caller should expect to wait on, which is
+why :func:`align` reports progress.
 
 The signal is *not* mean luma. Mean luma barely moves inside a shot, so its
 correlation surface is a broad plateau and the argmax wanders across it: on a
@@ -43,6 +49,7 @@ a failure.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
@@ -302,12 +309,22 @@ def align(
     windows: int = 2,
     max_shift: int | None = None,
     window_frames: int | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> Alignment:
     """Measure how far *source* sits from *target*, and decide whether to trust it.
 
     A positive offset means *source* has that many extra frames at the head, so
     its metadata must have that many frames removed to line up with *target*.
+
+    *progress* is called before each window. On a feature this runs for minutes,
+    and a command that prints nothing for four of them looks like one that has
+    hung.
     """
+
+    def say(message: str) -> None:
+        if progress is not None:
+            progress(message)
+
     frames_a = source.frame_count or 0
     frames_b = target.frame_count or 0
     if not frames_a or not frames_b:
@@ -324,10 +341,15 @@ def align(
     )
 
     results: list[WindowResult] = []
-    for start, length in starts:
+    for index, (start, length) in enumerate(starts, start=1):
+        say(
+            f"window {index} of {len(starts)}: decoding {length + shift} frames from "
+            f"frame {start} of each file"
+        )
         curve_a = luma_curve(source, toolbox, start_frame=start, frames=length + shift)
         curve_b = luma_curve(target, toolbox, start_frame=start, frames=length + shift)
         offset, confidence, peak = correlate(curve_a, curve_b, shift)
+        say(f"window {index}: offset {offset:+d}, confidence {confidence:.2f}")
         results.append(
             WindowResult(
                 start_frame=start,
@@ -431,9 +453,9 @@ def align(
         confidence=best.confidence,
         windows=tuple(results),
         reason=(
-            f"{len(results)} window"
-            + ("s" if len(results) != 1 else "")
-            + f" agree on {offset:+d} frames"
+            f"{len(results)} windows agree on {offset:+d} frames"
+            if len(results) != 1
+            else f"one window, measuring {offset:+d} frames"
         ),
     )
 
