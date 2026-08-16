@@ -88,6 +88,20 @@ class TestRefusals:
         plan = build_plan(source, target)
         assert not plan.ok
         assert "different cut" in _blocker_texts(plan)
+        assert "76 minutes" in _blocker_texts(plan)
+
+    def test_a_small_gap_on_a_short_clip_is_still_refused_but_readable(self) -> None:
+        """The gap has to be described in a unit that survives the scale.
+
+        20% of a thousand-frame clip is eight seconds. Printed as whole minutes
+        it reads "about 0 minutes", which sounds like a broken message rather
+        than a fact about the files.
+        """
+        source = make_info("a.mkv", dv=True, dv_profile=8, frames=1000)
+        plan = build_plan(source, make_info("b.mkv", frames=800))
+        assert not plan.ok
+        assert "8.3 seconds" in _blocker_texts(plan)
+        assert "0 minutes" not in _blocker_texts(plan)
 
     def test_unhandled_dv_profile_is_refused(self) -> None:
         source = make_info("odd.mkv", dv=True, dv_profile=4, frames=1000)

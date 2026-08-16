@@ -218,6 +218,80 @@ class TestEndToEnd:
         assert after.has_dv
         assert after.frame_count == target.frame_count
 
+    def test_metadata_is_retimed_to_a_shorter_target(
+        self, media: Path, toolbox, tmp_path: Path
+    ) -> None:
+        """The hardest path, on real footage: measure, retime, inject, verify.
+
+        The target is the first 960 frames of the source with its Dolby Vision
+        stripped — built by stream copy, a route the pipeline never takes. So
+        the correct answer is known before the run: offset 0, an RPU trimmed
+        from 1000 frames to 960, and a picture identical to the target's.
+
+        Without the retiming step this is precisely the case dovi_tool would
+        accept: it would pad the 1000-frame RPU against a 960-frame video and
+        exit successfully.
+        """
+        from hibrit.pipeline import run
+        from hibrit.planner import build_plan
+        from hibrit.verify import verify
+
+        source_mkv = _need(media, "align_a.mkv")
+        clip = _need(media, "p8_clip.hevc")
+        dovi = DoviTool(toolbox)
+
+        trimmed = tmp_path / "trimmed.hevc"
+        toolbox.run(
+            "ffmpeg",
+            [
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(clip),
+                "-map",
+                "0:v:0",
+                "-frames:v",
+                "960",
+                "-c",
+                "copy",
+                "-f",
+                "hevc",
+                str(trimmed),
+            ],
+        )
+        clean = dovi.remove(trimmed, tmp_path / "clean.hevc")
+        target_mkv = tmp_path / "target.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(target_mkv), str(clean)], check=False)
+
+        source = probe(source_mkv, toolbox)
+        target = probe(target_mkv, toolbox)
+        assert (source.frame_count, target.frame_count) == (1000, 960)
+
+        plan = build_plan(source, target)
+        assert plan.ok
+        assert plan.needs_alignment, "a 40-frame gap has to be retimed"
+
+        workdir = tmp_path / "work"
+        result = run(plan, tmp_path / "out.mkv", workdir=workdir, toolbox=toolbox)
+
+        assert result.alignment is not None
+        assert result.alignment.usable
+        assert result.alignment.offset == 0
+        assert dovi.info(result.rpu).frames == 960, "the RPU was not trimmed"
+
+        report = verify(
+            result.output,
+            target=target_mkv,
+            rpu=result.rpu,
+            clean_target_stream=result.clean_target_stream,
+            workdir=workdir,
+            toolbox=toolbox,
+        )
+        assert report.passed, report.describe()
+        assert not report.unmeasured
+
 
 class TestProbeReadsRealFiles:
     def test_reads_dolby_vision_and_hdr10plus_together(self, media: Path, toolbox) -> None:
