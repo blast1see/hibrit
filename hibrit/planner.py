@@ -164,12 +164,14 @@ def build_plan(
 
     # --- what is even available -------------------------------------------------
     available: list[Kind] = []
+    already_present: list[Kind] = []
     for kind in wanted:
         source_has = source.has_dv if kind is Kind.DV else source.has_hdr10plus
         target_has = target.has_dv if kind is Kind.DV else target.has_hdr10plus
         if not source_has:
             continue
         if target_has and not replace_existing:
+            already_present.append(kind)
             notes.append(
                 Note(
                     Level.INFO,
@@ -210,14 +212,28 @@ def build_plan(
             )
         )
     if not transfer and not any(n.level is Level.BLOCKER for n in notes):
-        notes.append(
-            Note(
-                Level.BLOCKER,
-                "the source carries nothing the target is missing. Check that you have "
-                "the two files the right way round: source donates metadata, target "
-                "keeps its picture.",
+        if already_present:
+            # Distinct from having nothing to give: the source does have it, the
+            # target has it too, and the fix is a flag rather than swapping the
+            # arguments. Telling this user to check the file order sends them
+            # looking for a mistake they did not make.
+            kinds = " and ".join(k.label for k in already_present)
+            notes.append(
+                Note(
+                    Level.BLOCKER,
+                    f"nothing left to transfer: the target already has {kinds}. Pass "
+                    "--replace if you meant to overwrite it with the source's copy.",
+                )
             )
-        )
+        else:
+            notes.append(
+                Note(
+                    Level.BLOCKER,
+                    "the source carries nothing the target is missing. Check that you "
+                    "have the two files the right way round: source donates metadata, "
+                    "target keeps its picture.",
+                )
+            )
 
     if source.resolution and target.resolution and source.resolution != target.resolution:
         notes.append(

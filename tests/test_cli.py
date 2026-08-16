@@ -77,6 +77,32 @@ class TestExitCodes:
         assert cli.main(["doctor"]) == 130
         assert "nothing further was written" in capsys.readouterr().err
 
+    def test_a_missing_path_names_which_argument_was_wrong(self, capsys, tmp_path) -> None:
+        """This subcommand takes five paths. A bare FileNotFoundError traceback
+        does not say which of them the user got wrong."""
+        result = tmp_path / "result.mkv"
+        result.write_bytes(b"not really a matroska file")
+
+        code = cli.main(
+            [
+                "verify",
+                str(result),
+                "--clean-stream",
+                str(tmp_path / "gone.hevc"),
+                "-w",
+                str(tmp_path),
+            ]
+        )
+        assert code == 2
+        message = capsys.readouterr().err
+        assert "--clean-stream" in message
+        assert "Traceback" not in message
+
+    def test_the_first_bad_path_is_the_one_reported(self, capsys, tmp_path) -> None:
+        code = cli.main(["verify", str(tmp_path / "gone.mkv"), "-w", str(tmp_path)])
+        assert code == 2
+        assert "result does not exist" in capsys.readouterr().err
+
     def test_version_is_the_packaged_version(self, capsys) -> None:
         from hibrit import __version__
 

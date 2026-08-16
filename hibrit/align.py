@@ -109,12 +109,26 @@ class Alignment:
         return self.verdict is Verdict.RELIABLE and self.offset is not None
 
     def describe(self) -> str:
+        """One line, with the verdict where it will be read.
+
+        A rejected measurement still has a number attached, and leading with
+        that number is how it gets used anyway — the reader sees "offset -115"
+        and the refusal after it. So an untrusted result leads with the verdict
+        and demotes the figure to a candidate.
+        """
         if self.offset is None:
             return f"{self.verdict.value}: {self.reason}"
+
         sign = "+" if self.offset >= 0 else ""
+        windows = f"{len(self.windows)} window" + ("s" if len(self.windows) != 1 else "")
+        if self.verdict is Verdict.RELIABLE:
+            return (
+                f"offset {sign}{self.offset} frames · confidence {self.confidence:.2f} "
+                f"· {windows} · reliable"
+            )
         return (
-            f"offset {sign}{self.offset} frames · confidence {self.confidence:.2f} "
-            f"· {len(self.windows)} windows · {self.verdict.value}"
+            f"{self.verdict.value} — best candidate was {sign}{self.offset} frames "
+            f"at confidence {self.confidence:.2f} ({windows})"
         )
 
 

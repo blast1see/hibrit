@@ -29,6 +29,25 @@ def _toolbox(args: argparse.Namespace) -> Toolbox:
     return Toolbox(extra_dirs=tuple(extra))
 
 
+class InputMissing(RuntimeError):
+    """A path given on the command line does not exist."""
+
+
+def _existing(value: str | None, label: str) -> Path | None:
+    """Resolve a path argument, or explain which one is wrong.
+
+    Checked here rather than left to whatever opens the file first: a stack
+    trace ending in FileNotFoundError does not say which of five path arguments
+    was the bad one, and this program takes a lot of path arguments.
+    """
+    if value is None:
+        return None
+    path = Path(value)
+    if not path.exists():
+        raise InputMissing(f"{label} does not exist: {path}")
+    return path
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     box = _toolbox(args)
     print(f"hibrit {__version__}\n")
@@ -170,11 +189,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     box = _toolbox(args)
     report = verify(
-        Path(args.result),
-        target=Path(args.target) if args.target else None,
-        rpu=Path(args.rpu) if args.rpu else None,
-        hdr10plus=Path(args.hdr10plus) if args.hdr10plus else None,
-        clean_target_stream=Path(args.clean_stream) if args.clean_stream else None,
+        _existing(args.result, "result"),
+        target=_existing(args.target, "--target"),
+        rpu=_existing(args.rpu, "--rpu"),
+        hdr10plus=_existing(args.hdr10plus, "--hdr10plus"),
+        clean_target_stream=_existing(args.clean_stream, "--clean-stream"),
         workdir=Path(args.workdir),
         toolbox=box,
     )
@@ -270,6 +289,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}\n\nRun 'hibrit doctor' to see what is missing.", file=sys.stderr)
         return 2
     except (ToolFailed, RuntimeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    except OSError as error:
+        # Anything the up-front checks did not catch: a path that vanished
+        # mid-run, a full disk, a permission problem. Still a sentence, not a
+        # traceback.
         print(f"error: {error}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

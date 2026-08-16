@@ -46,6 +46,23 @@ class TestWhatMoves:
         assert plan.transfer == ()
         assert not plan.ok
 
+    def test_nothing_left_to_do_is_not_the_same_as_files_swapped(self) -> None:
+        """Two different dead ends deserve two different sentences.
+
+        Telling someone whose target already has the metadata to check the file
+        order sends them hunting for a mistake they did not make. The fix is a
+        flag, and the message should say so.
+        """
+        source = make_info("web.mkv", dv=True, dv_profile=8, frames=1000)
+        target = make_info("bluray.mkv", dv=True, dv_profile=7, frames=1000)
+        blocked = _blocker_texts(build_plan(source, target))
+        assert "--replace" in blocked
+        assert "right way round" not in blocked
+
+        # And the genuinely-swapped case still says what it said.
+        swapped = _blocker_texts(build_plan(make_info("a.mkv"), make_info("b.mkv")))
+        assert "right way round" in swapped
+
     def test_replace_forces_the_overwrite_and_warns(self) -> None:
         source = make_info("web.mkv", dv=True, dv_profile=8, frames=1000)
         target = make_info("bluray.mkv", dv=True, dv_profile=7, frames=1000)
