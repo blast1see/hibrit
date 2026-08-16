@@ -141,8 +141,74 @@ jobs:
           cache: pip
       - run: pip install -e ".[build]"
       - run: pyinstaller --noconfirm hibrit.spec
+
+      # A frozen build can start and still be broken: a missing hidden import
+      # only shows up on the code path that needs it, and `--version` needs
+      # none of them. So the packaged executable is made to do the actual job.
+      - name: The tools it will drive
+        shell: pwsh
+        env:
+          DOVI_TOOL_VERSION: "2.3.3"
+          HDR10PLUS_TOOL_VERSION: "1.7.2"
+        run: |
+          New-Item -ItemType Directory -Force dist/hibrit/tools | Out-Null
+          $base = "https://github.com/quietvoid"
+          $urls = @(
+            "$base/dovi_tool/releases/download/$env:DOVI_TOOL_VERSION/dovi_tool-$env:DOVI_TOOL_VERSION-x86_64-pc-windows-msvc.zip",
+            "$base/hdr10plus_tool/releases/download/$env:HDR10PLUS_TOOL_VERSION/hdr10plus_tool-$env:HDR10PLUS_TOOL_VERSION-x86_64-pc-windows-msvc.zip"
+          )
+          foreach ($url in $urls) {
+            $zip = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileName($url))
+            Invoke-WebRequest -Uri $url -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath dist/hibrit/tools -Force
+          }
+          choco install ffmpeg-full mkvtoolnix mediainfo-cli -y --no-progress
+          "C:\Program Files\MKVToolNix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: The binary answers for itself
-        run: dist/hibrit/hibrit.exe --version
+        run: |
+          dist/hibrit/hibrit.exe --version
+          dist/hibrit/hibrit.exe doctor
+
+      - name: The binary does the job
+        shell: pwsh
+        # Ten seconds of synthesised HDR10, a generated RPU, and a whole run
+        # through the packaged executable — plan, inject, remux, verify. If any
+        # of that is missing from the bundle this fails here rather than in
+        # somebody's download.
+        run: |
+          $work = Join-Path $env:RUNNER_TEMP "smoke"
+          New-Item -ItemType Directory -Force $work | Out-Null
+          ffmpeg -y -hide_banner -loglevel error -f lavfi `
+            -i "testsrc2=size=320x240:rate=24:duration=10" `
+            -c:v libx265 -pix_fmt yuv420p10le -preset ultrafast -crf 30 `
+            -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc `
+            -x265-params "log-level=none:master-display=G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,1)" `
+            -f hevc "$work/clip.hevc"
+          @'
+          {"length": 240, "source_min_pq": 0, "source_max_pq": 3079,
+           "level6": {"max_display_mastering_luminance": 1000,
+                      "min_display_mastering_luminance": 1,
+                      "max_content_light_level": 1000,
+                      "max_frame_average_light_level": 400}}
+          '@ | Set-Content -Encoding utf8 "$work/gen.json"
+          dist/hibrit/tools/dovi_tool.exe generate -j "$work/gen.json" -o "$work/rpu.bin"
+          dist/hibrit/tools/dovi_tool.exe inject-rpu -i "$work/clip.hevc" --rpu-in "$work/rpu.bin" -o "$work/dv.hevc"
+          mkvmerge -q -o "$work/source.mkv" "$work/dv.hevc"
+          mkvmerge -q -o "$work/target.mkv" "$work/clip.hevc"
+
+          dist/hibrit/hibrit.exe plan "$work/source.mkv" "$work/target.mkv"
+          dist/hibrit/hibrit.exe run "$work/source.mkv" "$work/target.mkv" `
+            -o "$work/out.mkv" -w "$work/run" -y
+          if (-not (Test-Path "$work/out.mkv")) { throw "the packaged build wrote nothing" }
+
+      - name: Take the borrowed binaries back out
+        # They were downloaded to prove the package works, not to ship inside
+        # it. A release does not bundle them and neither should this artifact,
+        # or somebody downloads a stale dovi_tool without knowing they have.
+        shell: pwsh
+        run: Remove-Item -Recurse -Force dist/hibrit/tools
+
       - uses: actions/upload-artifact@v4
         with:
           name: hibrit-windows
