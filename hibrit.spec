@@ -24,6 +24,13 @@ ROOT = Path(SPECPATH)
 #: a third of its size on disk.
 EXCLUDES = ["pytest", "ruff", "numpy.testing", "numpy.f2py"]
 
+# There is no tcl/tk data directory in the output and there should not be one.
+# Searching the bundle for init.tcl finds nothing, which looks like a build
+# about to fail on first launch — it is not. Tcl 9 mounts its script library
+# inside the DLL and reports it as "//zipfs:/lib/tcl/tcl_library". Both
+# executables were built and launched to check; both open a window. Do not
+# "fix" this by collecting tcl data files.
+
 cli = Analysis(
     [str(ROOT / "packaging" / "entry_cli.py")],
     pathex=[str(ROOT)],
