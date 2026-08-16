@@ -23,9 +23,15 @@ from hibrit.probe import VideoInfo
 CONVERT_MODE_FOR_PROFILE = {5: 3, 7: 2}
 
 #: Frame-count difference, as a fraction of the runtime, beyond which the two
-#: files are not two releases of the same cut. Head trims and credit changes are
-#: measured in seconds; this is measured in minutes.
+#: files may not be two releases of the same cut.
 GROSS_RUNTIME_GAP = 0.05
+
+#: ...and the gap has to be this long as well. A fraction on its own is the
+#: wrong test: forty frames of a ten-second clip is 17% of it and still only
+#: 1.7 seconds, which is a logo, not a different edit of the film. Both
+#: conditions have to hold, because what makes a gap suspicious is that it is
+#: large *and* long enough to be structural.
+GROSS_RUNTIME_SECONDS = 30.0
 
 
 class Kind(str, Enum):
@@ -319,8 +325,9 @@ def build_plan(
     if frames_differ:
         gap = abs((source.frame_count or 0) - (target.frame_count or 0))
         span = max(source.frame_count or 1, target.frame_count or 1)
-        if gap > span * GROSS_RUNTIME_GAP:
-            rate = float(target.frame_rate or 24)
+        rate = float(target.frame_rate or 24)
+        gap_seconds = gap / rate if rate else 0.0
+        if gap > span * GROSS_RUNTIME_GAP and gap_seconds > GROSS_RUNTIME_SECONDS:
             notes.append(
                 Note(
                     Level.BLOCKER,
