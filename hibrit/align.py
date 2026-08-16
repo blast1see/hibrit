@@ -28,6 +28,16 @@ Two rules carried over from that work, both learned the expensive way:
 * **One window can lie.** The offset is measured in two places in the film.
   If they disagree, the releases differ structurally and no single offset can
   align them, so the answer is a refusal rather than an average.
+
+One limitation follows from the clipping, and it is better stated than
+discovered: because clipping flattens how *large* each cut is, what remains is
+mostly *when* the cuts happen. Footage whose shots all run the same length gives
+a near-periodic signal that matches itself almost as well one shot over as it
+does at the true offset — measured at confidence 1.1 on a test clip cut at a
+metronomic 9 frames. Real films have irregular shot rhythm and that irregularity
+is the fingerprint; material that does not (a slideshow, a rigidly cut montage)
+will be refused rather than mismeasured, which is the right failure but is still
+a failure.
 """
 
 from __future__ import annotations
