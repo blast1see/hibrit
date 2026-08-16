@@ -1,0 +1,73 @@
+name: Release
+
+# CI builds the executable on every push, but uploads it as a workflow artifact:
+# it expires in fourteen days and only a signed-in user can download it. The
+# README points people at the releases page, so something has to put one there.
+
+on:
+  push:
+    tags: ["v*"]
+  # For rebuilding a tag whose run failed, without moving the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing tag to build and publish"
+        required: true
+
+permissions:
+  contents: write # creating a release writes to the repository
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -e ".[build]"
+
+      # Before the slow part: refuse a tag that disagrees with the packaged
+      # version. Finding that out after the build is finding it out too late.
+      - name: The tag and the package agree on the version
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}" -replace '^v', ''
+          $packaged = python -c "import hibrit; print(hibrit.__version__)"
+          if ($tag -ne $packaged) {
+            throw "tag says $tag, package says $packaged"
+          }
+          Write-Output "both say $packaged"
+
+      - run: pyinstaller --noconfirm hibrit.spec
+
+      - name: The binary answers for itself
+        run: dist/hibrit/hibrit.exe --version
+
+      - name: Archive, and record what it hashes to
+        id: archive
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}"
+          $name = "hibrit-$tag-windows-x64.zip"
+          # -Path dist/hibrit, not dist/hibrit/*: the archive should unzip into
+          # a folder rather than scatter its contents into Downloads.
+          Compress-Archive -Path dist/hibrit -DestinationPath $name
+          $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii "$name.sha256"
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create ${{ inputs.tag || github.ref_name }}
+          "${{ steps.archive.outputs.name }}"
+          "${{ steps.archive.outputs.name }}.sha256"
+          --title "hibrit ${{ inputs.tag || github.ref_name }}"
+          --notes "dovi_tool and hdr10plus_tool are not bundled. Run 'hibrit doctor' after unzipping to see what to download."

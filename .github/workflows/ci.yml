@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is where this is developed and where the drive-letter working
+        # directories live; Linux is where anything quietly assuming a Windows
+        # path convention shows up.
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - run: pip install -e ".[dev]"
+
+      # The unmarked tier is pure logic and needs nothing installed. The
+      # `tools` and `real` tiers are deliberately not run here: the binaries are
+      # third-party releases and the media is tens of gigabytes of films. They
+      # run on the developer's machine, and the README says so rather than
+      # letting a green tick imply they ran.
+      - name: Unit tests
+        run: pytest -q -m "not tools and not real" --cov=hibrit
+
+      - name: The package imports and answers for itself
+        run: python -m hibrit --version
+
+  package:
+    # Proving the release artefact builds on every push, rather than at tag time
+    # when it is too late to find out.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[build]"
+      - run: pyinstaller --noconfirm hibrit.spec
+      - name: The binary answers for itself
+        run: dist/hibrit/hibrit.exe --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hibrit-windows
+          path: dist/hibrit
+          retention-days: 14

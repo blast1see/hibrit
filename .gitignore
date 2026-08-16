@@ -1,0 +1,38 @@
+# Environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# The external binaries. They are other people's releases, they are large, and
+# they are versioned upstream. `hibrit doctor` tells you which are missing.
+tools/*.exe
+tools/*.dll
+tools/dovi_tool
+tools/hdr10plus_tool
+tools/mediainfo
+
+# Working files. Extracted streams and injected streams are the size of the
+# films they came from; nothing in here should ever reach a commit.
+*.hevc
+*.h265
+*.rpu
+*.bin
+work/
+out/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

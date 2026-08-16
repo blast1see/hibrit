@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hibrit"
+version = "0.1.0"
+description = "Transfer Dolby Vision and HDR10+ metadata between releases of the same title"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "blast1see" }]
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "ruff>=0.11",
+]
+build = ["pyinstaller>=6.12"]
+
+[project.scripts]
+hibrit = "hibrit.__main__:main"
+
+[project.gui-scripts]
+hibrit-gui = "hibrit.gui:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hibrit"]
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "tools: requires dovi_tool / hdr10plus_tool / ffmpeg binaries",
+    "real: requires large real-world media files; slow",
+    "gui: requires a graphical display",
+]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    '\.\.\.$',
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hibrit"]
