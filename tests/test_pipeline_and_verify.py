@@ -192,6 +192,27 @@ class TestPictureDigest:
         for chunk in (1, 2, 3, 4, 5, 7, 64, 503):
             assert picture_digest(path, chunk=chunk) == whole, f"chunk={chunk}"
 
+    def test_a_container_is_refused_rather_than_parsed(self, tmp_path) -> None:
+        """The failure this guard exists for is a confident wrong answer.
+
+        Matroska stores HEVC length-prefixed, so scanning one for start codes
+        finds byte patterns that happen to occur inside compressed data. Doing
+        it to a 72 GB remux turned up 303,436 of them and produced a hash of
+        nothing in particular — which would have compared equal to itself and
+        unequal to everything else, exactly like a working check.
+        """
+        for suffix in (".mkv", ".mp4", ".webm"):
+            path = tmp_path / f"movie{suffix}"
+            path.write_bytes(annex_b([(1, b"\x11" * 40)]))
+            with pytest.raises(ValueError, match="container"):
+                picture_digest(path)
+
+    def test_a_bare_stream_is_parsed(self, tmp_path) -> None:
+        for suffix in (".hevc", ".h265", ".bin", ""):
+            path = tmp_path / f"stream{suffix}"
+            path.write_bytes(annex_b([(1, b"\x11" * 40)]))
+            assert picture_digest(path)[1] == 1
+
     def test_an_empty_file_is_not_a_match_for_everything(self, tmp_path) -> None:
         empty = tmp_path / "empty.hevc"
         empty.write_bytes(b"")
