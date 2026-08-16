@@ -112,6 +112,24 @@ def throttle_progress(say: Progress, *, step: int = 10) -> Progress:
     return forward
 
 
+def describe_leftovers(workdir: Path) -> str:
+    """What a stopped job left in the working directory, and how much of it.
+
+    At this scale the number is the point. A run that dies after extracting a
+    70 GB stream and injecting into it has 140 GB sitting there, and a user who
+    is not told will meet it as a full disk some other day.
+    """
+    files = [p for p in Path(workdir).glob("*") if p.is_file()]
+    if not files:
+        return ""
+    total = sum(p.stat().st_size for p in files)
+    names = ", ".join(sorted(p.name for p in files))
+    return (
+        f"{len(files)} file(s) left in {workdir} using {total / 2**30:.1f} GB "
+        f"({names}). Nothing was deleted; remove them when you are done looking."
+    )
+
+
 def free_space(path: Path) -> int:
     """Bytes free on the volume holding *path*, walking up to a parent that exists."""
     probe_path = Path(path)
@@ -209,6 +227,49 @@ def run(
         check_space(workdir, plan.target.path)
         say(f"working directory {workdir}: {free_space(workdir) / 2**30:.1f} GB free")
 
+    try:
+        return _execute(
+            plan,
+            output,
+            workdir=workdir,
+            box=box,
+            say=say,
+            tool_output=tool_output,
+            approve=approve,
+            alignment=alignment,
+            keep_intermediates=keep_intermediates,
+            keep_clean_stream=keep_clean_stream,
+            log=log,
+        )
+    except BaseException:
+        # KeyboardInterrupt included on purpose: a job stopped by hand at 60 GB
+        # in leaves exactly as much behind as one that failed. Nothing is
+        # deleted — a half-written stream is evidence, and this program's whole
+        # posture is to explain rather than to tidy up quietly — but the user is
+        # told what is there, because otherwise they find out when the disk
+        # fills up a week later.
+        remains = describe_leftovers(workdir)
+        if remains:
+            say(f"stopped. {remains}")
+        raise
+
+
+def _execute(
+    plan: Plan,
+    output: Path,
+    *,
+    workdir: Path,
+    box: Toolbox,
+    say: Progress,
+    tool_output: Progress,
+    approve: Approve | None,
+    alignment: Alignment | None,
+    keep_intermediates: bool,
+    keep_clean_stream: bool,
+    log: list[str],
+) -> Result:
+    """The steps themselves. Split out so :func:`run` can report what a failure
+    left behind without the whole body sitting inside a ``try``."""
     source, target = plan.source, plan.target
     dovi = DoviTool(box)
     hdr10plus_tool = Hdr10PlusTool(box)

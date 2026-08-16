@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from conftest import make_info
 
 from hibrit import pipeline
 from hibrit.planner import build_plan
+from hibrit.rpu import FrameCountMismatch
 from hibrit.verify import Check, Report, picture_digest, sha256_file
 
 
@@ -89,6 +92,86 @@ class TestRunRefusals:
         plan = build_plan(make_info("a.mkv"), make_info("b.mkv"))
         with pytest.raises(pipeline.PipelineError, match="cannot run"):
             pipeline.run(plan, tmp_path / "out.mkv", workdir=tmp_path)
+
+
+class TestLeftovers:
+    """What a stopped job says about the disk it was using.
+
+    Nothing is deleted — a half-written stream is evidence, and tidying up
+    quietly is not this program's posture — but at 70 GB a run that dies after
+    two passes has left 140 GB behind, and a user who is not told meets it as a
+    full disk some other day.
+    """
+
+    def test_it_names_the_files_and_the_total(self, tmp_path) -> None:
+        (tmp_path / "target.hevc").write_bytes(b"x" * 3000)
+        (tmp_path / "with_dv.hevc").write_bytes(b"y" * 5000)
+        summary = pipeline.describe_leftovers(tmp_path)
+        assert "2 file(s)" in summary
+        assert "target.hevc" in summary and "with_dv.hevc" in summary
+        assert str(tmp_path) in summary
+        assert "Nothing was deleted" in summary
+
+    def test_an_empty_directory_says_nothing(self, tmp_path) -> None:
+        """No message beats a message about nothing."""
+        assert pipeline.describe_leftovers(tmp_path) == ""
+
+    def test_a_failed_run_reports_what_it_left(self, tmp_path, monkeypatch) -> None:
+        """And the original exception still arrives with its own type."""
+        source = make_info("a.mkv", dv=True, dv_profile=8, frames=1000)
+        target = make_info("b.mkv", frames=1000)
+        plan = build_plan(source, target)
+        assert plan.ok
+
+        workdir = tmp_path / "work"
+
+        def fake_extract(_target, out, _box, progress=None):
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            Path(out).write_bytes(b"a partly written stream")
+            raise FrameCountMismatch(1000, 800)
+
+        monkeypatch.setattr(pipeline, "extract_video", fake_extract)
+        monkeypatch.setattr(pipeline.Toolbox, "missing_required", lambda _self: [])
+
+        said: list[str] = []
+        with pytest.raises(FrameCountMismatch):
+            pipeline.run(
+                plan,
+                tmp_path / "out.mkv",
+                workdir=workdir,
+                progress=said.append,
+                skip_space_check=True,
+            )
+
+        stopped = [line for line in said if line.startswith("stopped.")]
+        assert stopped, said
+        assert "target.hevc" in stopped[0]
+
+    def test_an_interrupted_run_reports_too(self, tmp_path, monkeypatch) -> None:
+        """Ctrl-C at 60 GB in leaves exactly as much behind as a crash."""
+        plan = build_plan(
+            make_info("a.mkv", dv=True, dv_profile=8, frames=1000),
+            make_info("b.mkv", frames=1000),
+        )
+
+        def interrupted(_target, out, _box, progress=None):
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            Path(out).write_bytes(b"half a stream")
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(pipeline, "extract_video", interrupted)
+        monkeypatch.setattr(pipeline.Toolbox, "missing_required", lambda _self: [])
+
+        said: list[str] = []
+        with pytest.raises(KeyboardInterrupt):
+            pipeline.run(
+                plan,
+                tmp_path / "out.mkv",
+                workdir=tmp_path / "work",
+                progress=said.append,
+                skip_space_check=True,
+            )
+        assert any(line.startswith("stopped.") for line in said)
 
 
 class TestReport:
