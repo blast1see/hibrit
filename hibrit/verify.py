@@ -28,7 +28,7 @@ from typing import Any
 
 from hibrit.hdr10plus import Hdr10PlusTool
 from hibrit.matroska import extract_video, is_wrapped
-from hibrit.probe import probe
+from hibrit.probe import VideoInfo, probe
 from hibrit.rpu import DoviTool
 from hibrit.tools import Toolbox
 
@@ -355,6 +355,48 @@ def _compare_pixels(
     return checks
 
 
+#: Fields MediaInfo reads out of the Dolby Vision configuration record that
+#: mkvmerge writes into the Matroska track header. A player looks at that
+#: record, not at the RPU units, to decide whether to engage Dolby Vision at
+#: all — so a stream can carry perfect metadata and still play as plain HDR10
+#: if the record is missing.
+DV_CONFIGURATION_FIELDS = ("HDR_Format_Profile", "HDR_Format_Level", "HDR_Format_Settings")
+
+
+def _check_container_signalling(after: VideoInfo) -> list[Check]:
+    """Did the container advertise the Dolby Vision, not merely contain it?
+
+    Everything else here inspects the bitstream. This is the one thing a player
+    reads first: mkvmerge derives a configuration record from the injected
+    stream and writes it into the track header, and its absence is invisible to
+    every other check in this module.
+    """
+    if not after.has_dv:
+        return []
+    missing = [field for field in DV_CONFIGURATION_FIELDS if not after.track.get(field)]
+    if missing:
+        return [
+            Check(
+                "container signalling",
+                False,
+                "the Dolby Vision configuration record is incomplete — "
+                f"{', '.join(missing)} absent. Players read that record to decide "
+                "whether to engage Dolby Vision, so this would play as plain HDR10.",
+            )
+        ]
+    profile = (after.track.get("HDR_Format_Profile") or "").split("/")[0].strip()
+    level = (after.track.get("HDR_Format_Level") or "").split("/")[0].strip()
+    layers = (after.track.get("HDR_Format_Settings") or "").split("/")[0].strip()
+    return [
+        Check(
+            "container signalling",
+            True,
+            f"the track header advertises {profile}, level {level}, {layers} — "
+            "which is what a player reads before it looks at the stream",
+        )
+    ]
+
+
 def verify(
     result: Path,
     *,
@@ -409,6 +451,7 @@ def verify(
                 f"mediainfo reports: {after.describe()}",
             )
         )
+        checks += _check_container_signalling(after)
 
     if clean_target_stream is not None:
         checks += _compare_pixels(Path(result), Path(clean_target_stream), workdir, box)

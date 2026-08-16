@@ -312,3 +312,66 @@ def test_sha256_matches_hashlib(tmp_path) -> None:
     payload = bytes(range(256)) * 5000
     path.write_bytes(payload)
     assert sha256_file(path, chunk=1024) == hashlib.sha256(payload).hexdigest()
+
+
+class TestContainerSignalling:
+    """The one thing a player reads before it reads the stream.
+
+    mkvmerge derives a Dolby Vision configuration record from the injected
+    bitstream and writes it into the Matroska track header. A player consults
+    that record to decide whether to engage Dolby Vision at all, so a file can
+    carry a perfect RPU and still play as plain HDR10 if the record is missing —
+    and every other check in verify.py inspects the bitstream, where it would
+    see nothing wrong.
+    """
+
+    from conftest import make_info as _make_info
+
+    @staticmethod
+    def _with_track(**fields):
+        from conftest import make_info
+
+        info = make_info("out.mkv", dv=True, dv_profile=8)
+        object.__setattr__(info, "track", fields)
+        return info
+
+    def test_a_complete_record_passes_and_says_what_it_advertises(self) -> None:
+        from hibrit.verify import _check_container_signalling
+
+        checks = _check_container_signalling(
+            self._with_track(
+                HDR_Format_Profile="dvhe.08 / ",
+                HDR_Format_Level="06 / ",
+                HDR_Format_Settings="BL+RPU / ",
+            )
+        )
+        assert len(checks) == 1
+        assert checks[0].passed
+        assert "dvhe.08" in checks[0].detail
+        assert "BL+RPU" in checks[0].detail
+
+    def test_a_missing_record_fails_and_says_what_that_means(self) -> None:
+        """Not "field absent" — what the user would see if they played it."""
+        from hibrit.verify import _check_container_signalling
+
+        checks = _check_container_signalling(self._with_track())
+        assert len(checks) == 1
+        assert not checks[0].passed
+        assert "plain HDR10" in checks[0].detail
+
+    def test_a_partial_record_names_the_missing_fields(self) -> None:
+        from hibrit.verify import _check_container_signalling
+
+        checks = _check_container_signalling(self._with_track(HDR_Format_Profile="dvhe.08 / "))
+        assert not checks[0].passed
+        assert "HDR_Format_Level" in checks[0].detail
+        assert "HDR_Format_Settings" in checks[0].detail
+
+    def test_a_file_without_dolby_vision_is_not_asked_about_it(self) -> None:
+        """HDR10+-only transfers have no configuration record to carry, and a
+        check that cannot apply should not appear at all."""
+        from conftest import make_info
+
+        from hibrit.verify import _check_container_signalling
+
+        assert _check_container_signalling(make_info("out.mkv", hdr10plus=True)) == []
