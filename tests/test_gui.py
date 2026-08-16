@@ -196,3 +196,65 @@ class _SilentMessagebox:
     @staticmethod
     def showinfo(*_args, **_kwargs) -> None:
         return None
+
+
+class TestOverrideCannotForceNothing:
+    """The override box forces a figure through. A refusal without a figure has
+    none, so there is nothing for it to force — and the pipeline would reject it
+    anyway, now before any work rather than after extracting the stream."""
+
+    def _apply(self, app, alignment):
+        app._apply_alignment(alignment)
+        return str(app.override_check["state"])
+
+    def test_a_refusal_with_a_candidate_offers_the_override(self, app) -> None:
+        from hibrit.align import Alignment, Verdict
+
+        state = self._apply(
+            app,
+            Alignment(
+                offset=-115, verdict=Verdict.NO_MATCH, confidence=1.04, windows=(), reason="noise"
+            ),
+        )
+        assert state == "normal"
+
+    def test_a_refusal_with_no_offset_does_not(self, app) -> None:
+        from hibrit.align import Alignment, Verdict
+
+        state = self._apply(
+            app,
+            Alignment(
+                offset=None, verdict=Verdict.NO_MATCH, confidence=1.1, windows=(), reason="disagree"
+            ),
+        )
+        assert state == "disabled"
+
+    def test_a_trusted_result_does_not_either(self, app) -> None:
+        """Nothing to override when the measurement is already believed."""
+        from hibrit.align import Alignment, Verdict
+
+        state = self._apply(
+            app,
+            Alignment(
+                offset=137, verdict=Verdict.RELIABLE, confidence=3.7, windows=(), reason="ok"
+            ),
+        )
+        assert state == "disabled"
+
+    def test_run_stays_disabled_while_the_offset_is_missing(
+        self, app, media, hdr10_target, tmp_path
+    ) -> None:
+        from hibrit.align import Alignment, Verdict
+
+        app.source_path.set(str(media / "align_a.mkv"))
+        app.target_path.set(str(media / "align_b.mkv"))
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+
+        app._apply_alignment(
+            Alignment(
+                offset=None, verdict=Verdict.NO_MATCH, confidence=1.1, windows=(), reason="disagree"
+            )
+        )
+        assert str(app.run_button["state"]) == "disabled"

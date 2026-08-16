@@ -274,9 +274,33 @@ def _execute(
     dovi = DoviTool(box)
     hdr10plus_tool = Hdr10PlusTool(box)
 
+    # --- settle the offset before writing anything -------------------------------
+    # Alignment reads the two original files and never looks at anything this
+    # function produces, so it can go first — and it must. It is the step most
+    # likely to end the job, and measuring it after extracting the target's
+    # stream means a refusal costs ten minutes and 68 GB of writing before
+    # anyone hears about it.
+    if plan.needs_alignment:
+        if alignment is None:
+            say("measuring frame offset between source and target")
+            # align speaks for itself rather than through a tool, so its
+            # messages are not thinned.
+            alignment = align(source, target, box, progress=say)
+        else:
+            say("using the offset measured earlier")
+        say(alignment.describe())
+        say(alignment.reason)
+
+        accepted = approve(alignment) if approve is not None else alignment.usable
+        if not accepted or alignment.offset is None:
+            raise PipelineError(
+                "alignment was not accepted, so nothing was written.\n"
+                f"{alignment.describe()}\n{alignment.reason}"
+            )
+
     # --- read the target's picture out of its container -------------------------
     say(f"extracting video stream from {target.name}")
-    # These four steps each rewrite the whole stream. On a 70 GB remux that is
+    # These steps each rewrite the whole stream. On a 70 GB remux that is
     # minutes apiece, and the tools do report their progress — swallowing it is
     # what makes a working job look like a hung one.
     target_stream = extract_video(target, workdir / "target.hevc", box, progress=tool_output)
@@ -299,25 +323,9 @@ def _execute(
         hdr10plus = hdr10plus_tool.extract(source.path, workdir / "hdr10plus.json")
         say(f"HDR10+: {read_json(hdr10plus).describe()}")
 
-    # --- line the metadata up with the target ------------------------------------
+    # --- retime the metadata to the offset settled above --------------------------
     if plan.needs_alignment:
-        if alignment is None:
-            say("measuring frame offset between source and target")
-            # align speaks for itself rather than through a tool, so its
-            # messages are not thinned.
-            alignment = align(source, target, box, progress=say)
-        else:
-            say("using the offset measured earlier")
-        say(alignment.describe())
-        say(alignment.reason)
-
-        accepted = approve(alignment) if approve is not None else alignment.usable
-        if not accepted or alignment.offset is None:
-            raise PipelineError(
-                "alignment was not accepted, so nothing was written.\n"
-                f"{alignment.describe()}\n{alignment.reason}"
-            )
-
+        assert alignment is not None and alignment.offset is not None  # settled above
         source_frames = source.frame_count or 0
         target_frames = target.frame_count or 0
         rpu, hdr10plus = _retime(

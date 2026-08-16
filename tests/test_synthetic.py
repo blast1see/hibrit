@@ -529,7 +529,13 @@ class TestRetimingThroughThePipeline:
     def test_an_unusable_alignment_writes_nothing(
         self, hdr10_clip, toolbox, tmp_path: Path
     ) -> None:
-        """Supplying a measurement is not the same as overriding the verdict."""
+        """Supplying a measurement is not the same as overriding the verdict.
+
+        And the refusal has to come before the target's stream is extracted.
+        Alignment reads the two original files and nothing the pipeline
+        produces, so measuring it after a 68 GB extraction would charge ten
+        minutes and a full copy for an answer that was available first.
+        """
         from hibrit.align import Alignment, Verdict
         from hibrit.pipeline import PipelineError, run
         from hibrit.planner import build_plan
@@ -545,15 +551,48 @@ class TestRetimingThroughThePipeline:
             reason="not distinguishable from noise",
         )
         out = tmp_path / "out.mkv"
+        workdir = tmp_path / "work"
+        with pytest.raises(PipelineError, match="not accepted"):
+            run(plan, out, workdir=workdir, toolbox=toolbox, alignment=refused)
+
+        assert not out.exists()
+        assert not (workdir / "target.hevc").exists(), (
+            "the target stream was extracted before the offset was settled"
+        )
+
+    def test_an_offset_of_none_is_refused_before_any_work(
+        self, hdr10_clip, toolbox, tmp_path: Path
+    ) -> None:
+        """Windows that disagreed leave no offset at all, only a verdict.
+
+        The window can be made to hand one of these over — its override box
+        forces a *figure* through, and a refusal with no figure has none.
+        """
+        from hibrit.align import Alignment, Verdict
+        from hibrit.pipeline import PipelineError, run
+        from hibrit.planner import build_plan
+
+        source_mkv, target_mkv = self._pair(hdr10_clip, FRAMES - 40, toolbox, tmp_path)
+        plan = build_plan(probe(source_mkv, toolbox), probe(target_mkv, toolbox))
+
+        no_offset = Alignment(
+            offset=None,
+            verdict=Verdict.NO_MATCH,
+            confidence=1.1,
+            windows=(),
+            reason="windows disagree",
+        )
+        workdir = tmp_path / "work"
         with pytest.raises(PipelineError, match="not accepted"):
             run(
                 plan,
-                out,
-                workdir=tmp_path / "work",
+                tmp_path / "out.mkv",
+                workdir=workdir,
                 toolbox=toolbox,
-                alignment=refused,
+                alignment=no_offset,
+                approve=lambda _: True,  # as the window supplies it
             )
-        assert not out.exists()
+        assert not (workdir / "target.hevc").exists()
 
 
 class TestContainer:
