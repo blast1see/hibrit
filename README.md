@@ -7,9 +7,12 @@ without re-encoding a single frame.
 produces: `Title.2021.Hybrid.2160p.UHD.BluRay.REMUX.DV.HDR10Plus...`
 
 > **Status: usable, and honest about what it cannot check.** The metadata
-> transfer is proven byte-for-byte by the test suite. Whether the two releases
-> you point it at *should* share metadata is a judgement no program can make;
-> see [The failure nothing here can catch](#the-failure-nothing-here-can-catch).
+> transfer is proven byte-for-byte by the test suite, and has been run end to
+> end on 18 GB of a real dual-layer profile 7 remux: every coded picture unit
+> identical, the HDR10+ byte-identical, the existing Dolby Vision untouched.
+> Whether the two releases you point it at *should* share metadata is a
+> judgement no program can make; see
+> [The failure nothing here can catch](#the-failure-nothing-here-can-catch).
 
 ---
 
@@ -179,6 +182,20 @@ was written for, a 72 GB job is refused on both the source drive (42 GB free)
 and the system drive (193 GB), and accepted on the one with space. Free space is
 checked before the first command runs, and each intermediate is deleted as soon
 as the next step has consumed it.
+
+## How long it takes
+
+Measured end to end on 60,000 frames of a real UHD remux — 18.2 GB, profile 7
+dual-layer, HDR10+ moved onto it:
+
+| Step | Time |
+|---|---|
+| `hibrit run` (extract, inject, remux) | 7m 36s |
+| Verification, picture check included | 3m 48s |
+
+That is about 120 MB/s of actual throughput across the three passes, so a 72 GB
+remux should be reckoned at half an hour or so, plus four and a half minutes if
+the frame counts differ and an alignment is needed.
 
 ## The failure nothing here can catch
 
