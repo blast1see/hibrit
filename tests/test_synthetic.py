@@ -308,6 +308,94 @@ class TestRefusals:
         assert not out.exists()
 
 
+class TestProfileFive:
+    """What ``-m 3`` actually does to a profile 5 RPU.
+
+    No profile 5 release was available to develop against — every WEB-DL on
+    hand had already been converted to 8.1 by its release group — so this path
+    was documented from reading rather than measurement until
+    ``dovi_tool generate -p 5`` turned out to make one. That is worth a test of
+    its own, because what everybody says about this conversion is wrong.
+    """
+
+    @pytest.fixture
+    def p5_rpu(self, synthetic_dir: Path, toolbox, tmp_path: Path) -> Path:
+        config = tmp_path / "generate.json"
+        config.write_text(json.dumps(_generate_config(FRAMES)), encoding="utf-8")
+        out = tmp_path / "p5.bin"
+        toolbox.run("dovi_tool", ["generate", "-j", str(config), "-p", "5", "-o", str(out)])
+        return out
+
+    @staticmethod
+    def _export(rpu: Path, out: Path, toolbox) -> list[dict]:
+        DoviTool(toolbox).export(rpu, out)
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    def test_generate_really_produces_profile_5(self, p5_rpu, toolbox) -> None:
+        info = DoviTool(toolbox).info(p5_rpu)
+        assert info.profile == 5
+        assert info.frames == FRAMES
+
+    def test_conversion_reaches_profile_8(self, p5_rpu, toolbox, tmp_path: Path) -> None:
+        dovi = DoviTool(toolbox)
+        converted = dovi.editor(p5_rpu, {"mode": 3}, tmp_path / "p81.bin", workdir=tmp_path)
+        after = dovi.info(converted)
+        assert after.profile == 8
+        assert after.frames == FRAMES
+
+    def test_the_trims_and_the_mapping_curves_survive(
+        self, p5_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The claim that -m 3 discards the mapping is not what happens.
+
+        Both the tone-mapping curves and every display-management block — the
+        CM v2.9 and v4.0 trims, which is where L1 content light level, L2 trims,
+        L5 active area and L6 mastering display live — come through unchanged.
+        """
+        dovi = DoviTool(toolbox)
+        converted = dovi.editor(p5_rpu, {"mode": 3}, tmp_path / "p81.bin", workdir=tmp_path)
+
+        before = self._export(p5_rpu, tmp_path / "before.json", toolbox)[0]
+        after = self._export(converted, tmp_path / "after.json", toolbox)[0]
+
+        assert after["rpu_data_mapping"] == before["rpu_data_mapping"]
+        for block in ("cmv29_metadata", "cmv40_metadata"):
+            assert after["vdr_dm_data"][block] == before["vdr_dm_data"][block], block
+
+    def test_what_changes_is_the_colour_space_the_numbers_mean(
+        self, p5_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """And this is the actual hazard.
+
+        The curves were authored against an IPT-PQ-C2 base. After conversion
+        they are unchanged but declared to apply to a BT.2020 PQ one, and the
+        matrices that get there are swapped wholesale. Nothing is lost; what the
+        surviving numbers describe is a different picture.
+        """
+        dovi = DoviTool(toolbox)
+        converted = dovi.editor(p5_rpu, {"mode": 3}, tmp_path / "p81.bin", workdir=tmp_path)
+
+        before = self._export(p5_rpu, tmp_path / "before.json", toolbox)[0]
+        after = self._export(converted, tmp_path / "after.json", toolbox)[0]
+
+        # IPT (2) becomes YCbCr (0).
+        assert before["vdr_dm_data"]["signal_color_space"] == 2
+        assert after["vdr_dm_data"]["signal_color_space"] == 0
+
+        # Profile 5 is full range; an HDR10 base layer is not.
+        assert before["header"]["bl_video_full_range_flag"] is True
+        assert after["header"]["bl_video_full_range_flag"] is False
+
+        for prefix in ("rgb_to_lms_coef", "ycc_to_rgb_coef"):
+            changed = [
+                index
+                for index in range(9)
+                if before["vdr_dm_data"][f"{prefix}{index}"]
+                != after["vdr_dm_data"][f"{prefix}{index}"]
+            ]
+            assert changed, f"{prefix} matrix was left alone"
+
+
 class TestRetiming:
     def test_an_offset_is_applied_and_the_result_then_fits(
         self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path

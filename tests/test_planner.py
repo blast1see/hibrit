@@ -105,6 +105,16 @@ class TestProfileHandling:
         assert plan.convert_mode == 3
         assert "IPT-PQ-C2" in _all_texts(plan)
 
+    def test_the_profile_5_warning_describes_what_was_measured(self) -> None:
+        """It is widely repeated that -m 3 drops the mapping. It does not: the
+        curves and trims come through untouched and the colour space they are
+        read in is rewritten. See test_synthetic.TestProfileFive."""
+        source = make_info("web.mkv", dv=True, dv_profile=5, hdr10=False, frames=1000)
+        plan = build_plan(source, make_info("bluray.mkv", frames=1000))
+        text = _all_texts(plan)
+        assert "keeps every trim and every mapping curve" in text
+        assert "rewrites the colour space" in text
+
     def test_profile_7_converts_with_mode_2(self) -> None:
         source = make_info("uhd.mkv", dv=True, dv_profile=7, dv_layers="BL+EL+RPU", frames=1000)
         target = make_info("bluray.mkv", frames=1000)
