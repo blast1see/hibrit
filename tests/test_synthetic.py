@@ -294,18 +294,48 @@ class TestRefusals:
         out = dovi.inject_rpu(hdr10_clip, nudged, tmp_path / "ok.hevc")
         assert out.exists()
 
+    @staticmethod
+    def _short_metadata(source: Path, out: Path, frames: int) -> Path:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        payload["SceneInfo"] = payload["SceneInfo"][:frames]
+        payload["SceneInfoSummary"] = {
+            "SceneFirstFrameIndex": [0],
+            "SceneFrameNumbers": [frames],
+        }
+        out.write_text(json.dumps(payload), encoding="utf-8")
+        return out
+
     def test_hdr10plus_length_is_checked_before_the_rewrite(
         self, hdr10_clip, synthetic_hdr10plus, toolbox, tmp_path: Path
     ) -> None:
-        short = tmp_path / "short.json"
-        payload = json.loads(synthetic_hdr10plus.read_text(encoding="utf-8"))
-        payload["SceneInfo"] = payload["SceneInfo"][:100]
-        short.write_text(json.dumps(payload), encoding="utf-8")
-
+        short = self._short_metadata(synthetic_hdr10plus, tmp_path / "short.json", 100)
         out = tmp_path / "bad.hevc"
         with pytest.raises(Hdr10PlusMismatch):
             Hdr10PlusTool(toolbox).inject(hdr10_clip, short, out, video_frames=FRAMES)
         assert not out.exists()
+
+    def test_hdr10plus_is_refused_even_without_a_frame_count_to_check(
+        self, hdr10_clip, synthetic_hdr10plus, toolbox, tmp_path: Path
+    ) -> None:
+        """The guard that catches it after the fact, driven by the real tool.
+
+        Without *video_frames* there is nothing to check up front, so the only
+        protection is reading what hdr10plus_tool says — and it says the same
+        thing dovi_tool does: a warning, a padded stream, and exit 0.
+
+        This assertion is here because the pattern that reads that warning was
+        written by analogy and matched nothing for weeks. Feeding it a synthetic
+        string proved only that the string I imagined parses. This feeds it the
+        tool.
+        """
+        short = self._short_metadata(synthetic_hdr10plus, tmp_path / "short.json", 150)
+        out = tmp_path / "bad.hevc"
+        with pytest.raises(Hdr10PlusMismatch) as caught:
+            Hdr10PlusTool(toolbox).inject(hdr10_clip, short, out)
+
+        assert caught.value.video_frames == FRAMES
+        assert caught.value.meta_frames == 150
+        assert not out.exists(), "a padded stream was left behind"
 
 
 class TestProfileFive:

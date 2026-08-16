@@ -72,7 +72,28 @@ class TestMismatchDetection:
         assert rpu_mod.find_mismatch("") is None
 
     def test_hdr10plus_warning_is_recognised_too(self) -> None:
+        """The exact line hdr10plus_tool 1.7.2 prints, copied from a run.
+
+        The first pattern here was written by analogy with dovi_tool's and
+        expected a number straight after "HDR10+". The real message says
+        "HDR10+ JSON 150", so it matched nothing and the guard was dead code —
+        which is the failure this whole project exists to catch, sitting in the
+        half of it that handles HDR10+.
+        """
+        real = (
+            "Parsing JSON file...\n"
+            "Processing input video for frame order info...\n\n"
+            "Warning: mismatched lengths. video 240, HDR10+ JSON 150\n"
+            "Metadata will be duplicated at the end to match video length\n"
+        )
+        assert h10p.find_mismatch(real) == (240, 150)
+
+    def test_the_dovi_wording_is_still_recognised(self) -> None:
+        """Loosening the pattern must not lose the case it already handled."""
         assert h10p.find_mismatch("mismatched lengths. video 1000, metadata 800") == (1000, 800)
+
+    def test_a_longer_metadata_stream_is_caught_as_well(self) -> None:
+        assert h10p.find_mismatch("mismatched lengths. video 240, HDR10+ JSON 900") == (240, 900)
 
     def test_mismatch_error_explains_the_consequence(self) -> None:
         error = rpu_mod.FrameCountMismatch(1000, 800)

@@ -18,10 +18,23 @@ from hibrit.tools import Toolbox
 
 DEFAULT_FRAME_TOLERANCE = 3
 
-_MISMATCH_RE = re.compile(
-    r"mismatched lengths\.\s*video\s+(?P<video>\d+),\s*(?:HDR10\+|metadata)\s+(?P<meta>\d+)",
-    re.IGNORECASE,
-)
+#: The line hdr10plus_tool 1.7.2 prints, measured rather than assumed::
+#:
+#:     Warning: mismatched lengths. video 240, HDR10+ JSON 150
+#:     Metadata will be duplicated at the end to match video length
+#:
+#: Two attempts at a pattern went wrong here, which is why this is now split
+#: into "find the line" and "read the numbers off it". The first expected a
+#: count straight after "HDR10+", as dovi_tool's message has after "RPU", and
+#: matched nothing — the guard was dead code for as long as nobody fed it a
+#: real mismatch. The second skipped ahead to the next number and found the
+#: "10" inside "HDR10+".
+_MISMATCH_LINE = re.compile(r"^.*mismatched lengths\..*$", re.IGNORECASE | re.MULTILINE)
+
+#: The video's count is the number right after "video"; the metadata's is the
+#: last number on the line, whatever words the tool puts in between.
+_VIDEO_COUNT = re.compile(r"video\s+(\d+)", re.IGNORECASE)
+_TRAILING_COUNT = re.compile(r"(\d+)\s*$")
 
 
 class Hdr10PlusMismatch(RuntimeError):
@@ -61,10 +74,16 @@ def read_json(path: Path) -> Hdr10PlusInfo:
 
 
 def find_mismatch(stderr: str) -> tuple[int, int] | None:
-    match = _MISMATCH_RE.search(stderr or "")
-    if match is None:
+    """Return ``(video_frames, metadata_frames)`` if the tool warned, else None."""
+    line = _MISMATCH_LINE.search(stderr or "")
+    if line is None:
         return None
-    return int(match.group("video")), int(match.group("meta"))
+    text = line.group(0)
+    video = _VIDEO_COUNT.search(text)
+    meta = _TRAILING_COUNT.search(text.rstrip())
+    if video is None or meta is None:
+        return None
+    return int(video.group(1)), int(meta.group(1))
 
 
 class Hdr10PlusTool:
