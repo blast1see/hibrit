@@ -23,7 +23,7 @@ import pytest
 from hibrit.hdr10plus import Hdr10PlusMismatch, Hdr10PlusTool, read_json
 from hibrit.matroska import extract_video, remux
 from hibrit.probe import probe
-from hibrit.rpu import DoviTool, FrameCountMismatch
+from hibrit.rpu import DoviTool, FrameCountMismatch, parse_info
 from hibrit.verify import sha256_file, verify
 
 pytestmark = pytest.mark.tools
@@ -165,6 +165,42 @@ def synthetic_hdr10plus(synthetic_dir: Path) -> Path:
     out = synthetic_dir / "generated_hdr10plus.json"
     out.write_text(json.dumps(_hdr10plus_json(FRAMES), indent=2), encoding="utf-8")
     return out
+
+
+class TestTheParserAgainstTheTool:
+    """The samples in test_metadata_tools.py are transcripts. This checks them.
+
+    A transcript goes stale the moment the tool changes its wording, and the
+    tests that read it keep passing — which is exactly how the HDR10+ mismatch
+    guard stayed dead for weeks. So one test parses what the tool says right
+    now, and fails when that stops matching what the transcripts assume.
+    """
+
+    def test_info_output_still_has_the_shape_the_samples_record(
+        self, synthetic_rpu, toolbox
+    ) -> None:
+        raw = toolbox.run("dovi_tool", ["info", "-i", str(synthetic_rpu), "-s"]).stdout
+        parsed = parse_info(raw)
+
+        assert parsed.frames == FRAMES
+        assert parsed.profile == 8
+        assert parsed.scene_count is not None
+        assert parsed.l5_offsets == (0, 0, 0, 0)
+        assert parsed.dm_version is not None
+
+        # The specific strings the samples are built from.
+        assert "Summary:" in raw
+        assert "Frames:" in raw
+        assert "Scene/shot count:" in raw
+        assert "L5 offsets:" in raw
+
+    def test_a_generated_profile_5_reports_profile_5(self, toolbox, tmp_path: Path) -> None:
+        config = tmp_path / "gen.json"
+        config.write_text(json.dumps(_generate_config(FRAMES)), encoding="utf-8")
+        rpu = tmp_path / "p5.bin"
+        toolbox.run("dovi_tool", ["generate", "-j", str(config), "-p", "5", "-o", str(rpu)])
+        raw = toolbox.run("dovi_tool", ["info", "-i", str(rpu), "-s"]).stdout
+        assert parse_info(raw).profile == 5
 
 
 class TestGeneratedMetadata:

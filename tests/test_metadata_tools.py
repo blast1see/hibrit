@@ -1,8 +1,14 @@
 """Parsing and guard behaviour for the two external metadata tools.
 
-The mismatch regexes matter more than they look. They are what turns
-dovi_tool's warning — printed to stdout, followed by exit code 0 — into a
-refusal.
+Every sample below is real output, copied from a run of dovi_tool 2.3.3. The
+ones that used to be here were written from memory and got the shape wrong in
+ways that mattered — the content-light-level line, the sub-lines under a
+two-version DM header — so they proved that my recollection parses rather than
+that the tool's output does. The same mistake in the HDR10+ mismatch pattern
+left that guard dead for weeks.
+
+The mismatch regexes matter more than they look. They are what turns a warning
+— printed to stdout, followed by exit code 0 — into a refusal.
 """
 
 from __future__ import annotations
@@ -14,24 +20,60 @@ import pytest
 from hibrit import hdr10plus as h10p
 from hibrit import rpu as rpu_mod
 
-DOVI_INFO_P7 = """
+#: `dovi_tool info -s` on the RPU of a real profile 7 remux clip.
+DOVI_INFO_P7 = """\
 Parsing RPU file...
+
 Summary:
   Frames: 1000
-  Profile: 7 (FEL)
+  Profile: 7 (MEL)
   DM version: 1 (CM v2.9)
-  Scene/shot count: 41
-  RPU mastering display: 1000/0.0001 nits
-  RPU content light level (L1 MaxCLL/MaxFALL): 853.38/43.60
+  Scene/shot count: 4
+  RPU mastering display: 0.0050/4000 nits
+  RPU content light level (L1): MaxCLL: 853.38 nits, MaxFALL: 43.60 nits
+  L6 metadata: Mastering display: 0.0050/4000 nits. MaxCLL: 787 nits, MaxFALL: 239 nits
   L5 offsets: top=276, bottom=277, left=0, right=0
+  L2 trims: 100 nits, 600 nits, 1000 nits
 """
 
-DOVI_INFO_P81 = """
+#: A real profile 8.1 remux clip. Note the DM header naming two versions, with
+#: indented counts underneath, and an L6 block spread over several lines — a
+#: shape the invented sample did not have.
+DOVI_INFO_P81 = """\
+Parsing RPU file...
+
 Summary:
-  Frames: 147624
+  Frames: 1000
   Profile: 8
+  DM version: 1 + 2 (CM 2.9 and 4.0)
+    v2.9 count: 1000
+    v4.0 count: 2
+  Scene/shot count: 4
+  RPU mastering display: 0.0001/1000 nits
+  RPU content light level (L1): MaxCLL: 124.11 nits, MaxFALL: 10.05 nits
+  L6 metadata
+    Mastering display: 0.0001/1000 nits. MaxCLL: 0 nits, MaxFALL: 0 nits
+    Mastering display: 0.0001/1000 nits. MaxCLL: 470 nits, MaxFALL: 151 nits
+  L5 offsets: top=0, bottom=0, left=0, right=0
+  L2 trims: 100 nits, 600 nits, 1000 nits
+  L9 MDP: DCI-P3 D65
+"""
+
+#: `dovi_tool generate -p 5`. Kept because it is the only profile 5 available
+#: anywhere on this machine.
+DOVI_INFO_P5 = """\
+Parsing RPU file...
+
+Summary:
+  Frames: 240
+  Profile: 5
   DM version: 2 (CM v4.0)
-  Scene/shot count: 2891
+  Scene/shot count: 1
+  RPU mastering display: 0.0000/1000 nits
+  RPU content light level (L1): MaxCLL: 100.10 nits, MaxFALL: 10.05 nits
+  L6 metadata: Mastering display: 0.0001/1000 nits. MaxCLL: 1000 nits, MaxFALL: 400 nits
+  L5 offsets: top=0, bottom=0, left=0, right=0
+  L9 MDP: DCI-P3 D65
 """
 
 
@@ -40,23 +82,51 @@ class TestParseInfo:
         info = rpu_mod.parse_info(DOVI_INFO_P7)
         assert info.frames == 1000
         assert info.profile == 7
-        assert info.layer_kind == "FEL"
-        assert info.is_fel and not info.is_mel
-        assert info.scene_count == 41
+        assert info.layer_kind == "MEL"
+        assert info.is_mel and not info.is_fel
+        assert info.scene_count == 4
         assert info.l5_offsets == (276, 277, 0, 0)
+        assert info.dm_version == "1 (CM v2.9)"
 
-    def test_reads_a_single_layer_summary(self) -> None:
+    def test_a_two_version_dm_header_with_sub_lines(self) -> None:
+        """The shape the invented sample got wrong.
+
+        A profile 8.1 remux reports both CM versions and indents a count under
+        each. The header line has to be read without swallowing what follows.
+        """
         info = rpu_mod.parse_info(DOVI_INFO_P81)
-        assert (info.frames, info.profile) == (147624, 8)
+        assert (info.frames, info.profile) == (1000, 8)
         assert info.layer_kind is None
-        assert info.l5_offsets is None
+        assert info.dm_version == "1 + 2 (CM 2.9 and 4.0)"
+        assert info.scene_count == 4
+        assert info.l5_offsets == (0, 0, 0, 0)
+
+    def test_reads_a_generated_profile_5(self) -> None:
+        info = rpu_mod.parse_info(DOVI_INFO_P5)
+        assert (info.frames, info.profile) == (240, 5)
+        assert info.layer_kind is None
+        assert not info.is_fel and not info.is_mel
 
     def test_unparseable_output_raises_rather_than_guessing(self) -> None:
         with pytest.raises(ValueError, match="could not parse"):
             rpu_mod.parse_info("dovi_tool: command not found")
 
     def test_describe_is_readable(self) -> None:
-        assert "P7 (FEL)" in rpu_mod.parse_info(DOVI_INFO_P7).describe()
+        assert "P7 (MEL)" in rpu_mod.parse_info(DOVI_INFO_P7).describe()
+        assert "4 scenes" in rpu_mod.parse_info(DOVI_INFO_P7).describe()
+
+    def test_fel_is_recognised_though_no_such_file_was_available(self) -> None:
+        """Honest about what this one is.
+
+        Every profile 7 clip on this machine is MEL, so the FEL branch is
+        exercised on a hand-edited line rather than on output from a file. It is
+        one word in the same position, and the MEL case above proves the
+        position; that is the whole of the evidence.
+        """
+        fel = DOVI_INFO_P7.replace("Profile: 7 (MEL)", "Profile: 7 (FEL)")
+        info = rpu_mod.parse_info(fel)
+        assert info.layer_kind == "FEL"
+        assert info.is_fel and not info.is_mel
 
 
 class TestMismatchDetection:
