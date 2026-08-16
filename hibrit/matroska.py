@@ -12,6 +12,7 @@ the tools parse.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -71,6 +72,48 @@ def extract_video(
     return out
 
 
+def video_track_properties(source: Path, toolbox: Toolbox | None = None) -> list[str]:
+    """mkvmerge arguments that restore a video track's own labelling.
+
+    The new video track is built from a raw Annex B stream, which carries no
+    name, no language and no flags; ``--no-video`` on the donor deliberately
+    drops its video track and takes that labelling with it. So a remux whose
+    video track was called "Blu-ray Remux" comes out with an unnamed one —
+    measured, not supposed.
+
+    Read through ``mkvmerge -J`` rather than MediaInfo because these values are
+    going straight back to mkvmerge, and it is the one that has to accept them:
+    MediaInfo normalises a language to "tr" where mkvmerge wants "tur".
+
+    Only what the target actually had is passed on. Supplying a default for
+    something it did not set would be inventing metadata, which is the one
+    thing this program is careful never to do.
+    """
+    box = toolbox or Toolbox()
+    proc = box.run("mkvmerge", ["-J", str(source)], check=False)
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return []
+
+    track = next((t for t in payload.get("tracks", []) if t.get("type") == "video"), None)
+    if track is None:
+        return []
+
+    props = track.get("properties", {})
+    args: list[str] = []
+    if props.get("track_name"):
+        args += ["--track-name", f"0:{props['track_name']}"]
+    language = props.get("language_ietf") or props.get("language")
+    if language and language != "und":
+        args += ["--language", f"0:{language}"]
+    if props.get("default_track") is False:
+        args += ["--default-track-flag", "0:no"]
+    if props.get("forced_track") is True:
+        args += ["--forced-display-flag", "0:yes"]
+    return args
+
+
 def remux(
     video: Path,
     donor: VideoInfo,
@@ -82,16 +125,20 @@ def remux(
     """Combine a new video stream with every other track from *donor*.
 
     ``--no-video`` on the second input keeps the donor's audio, subtitles,
-    chapters and attachments and drops only its old video.
+    chapters and attachments and drops only its old video — and, with it, the
+    video track's own name, language and flags. Those are read back off the
+    donor and reapplied, or a labelled track comes out unlabelled. See
+    :func:`video_track_properties`.
 
     mkvmerge exits 1 for warnings that are usually harmless (a track it had to
     reorder, a timestamp it adjusted) and 2 for real errors, so the exit code is
     read rather than assumed to be zero.
     """
     box = toolbox or Toolbox()
+    labelling = video_track_properties(donor.path, box)
     proc = box.run(
         "mkvmerge",
-        ["-o", str(out), str(video), "--no-video", str(donor.path)],
+        ["-o", str(out), *labelling, str(video), "--no-video", str(donor.path)],
         check=False,
         on_output=progress,
     )
