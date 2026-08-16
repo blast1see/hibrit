@@ -19,6 +19,7 @@ the caller gets a :class:`MissingTool` error naming it.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,12 +28,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: Binaries hibrit knows how to drive, mapped to the executable stem to look for.
+#:
+#: Everything listed here is something the program actually runs. ``ffprobe`` was
+#: here and is not any more: it is never invoked — MediaInfo answers the one
+#: question that matters and ffprobe does not report FrameCount reliably — so
+#: listing it only told users to go and install something for no reason. A test
+#: checks this list against the calls in the source.
 KNOWN_TOOLS: dict[str, str] = {
     "dovi_tool": "dovi_tool",
     "hdr10plus_tool": "hdr10plus_tool",
     "mediainfo": "mediainfo",
     "ffmpeg": "ffmpeg",
-    "ffprobe": "ffprobe",
     "mkvmerge": "mkvmerge",
     "mkvextract": "mkvextract",
 }
@@ -81,6 +87,34 @@ class ToolStatus:
     @property
     def ok(self) -> bool:
         return self.path is not None
+
+
+#: A version-looking token: 2.3.3, v99.0, 26.05, or a dated git build.
+_VERSION = re.compile(r"v?\d+(?:\.\d+)+|\d{4}-\d{2}-\d{2}")
+
+#: Where a version line turns into boilerplate. ffmpeg prints its copyright on
+#: the same line as its version and the copyright is four times as long.
+_NOISE = re.compile(r"\s+(?:Copyright|copyright)\b.*$")
+
+
+def parse_version(text: str) -> str | None:
+    """Pull a readable version out of whatever a tool prints.
+
+    Taking the first non-empty line is not enough. ``mediainfo --Version``
+    opens with "MediaInfo Command line," and puts the number on the line after,
+    so doctor reported no version at all for the one tool whose version matters
+    most — an old copy silently under-reports the HDR fields everything here
+    depends on.
+    """
+    for line in text.splitlines():
+        line = _NOISE.sub("", line.strip())
+        if line and _VERSION.search(line):
+            return line if len(line) <= 70 else line[:67] + "..."
+    # Nothing version-shaped; the first non-empty line is better than nothing.
+    for line in text.splitlines():
+        if line.strip():
+            return line.strip()
+    return None
 
 
 def bundled_tools_dir() -> Path:
@@ -239,12 +273,7 @@ class Toolbox:
             proc = self.run(name, [flag], check=False)
         except MissingTool:  # pragma: no cover - guarded above
             return None
-        text = (proc.stdout or proc.stderr or "").strip()
-        for line in text.splitlines():
-            line = line.strip()
-            if line:
-                return line
-        return None
+        return parse_version(proc.stdout or proc.stderr or "")
 
     def doctor(self) -> list[ToolStatus]:
         """Status of every known tool, for ``hibrit doctor``."""
