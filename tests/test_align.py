@@ -160,10 +160,15 @@ class TestAlign:
 
     def test_windows_that_disagree_produce_a_refusal_not_an_average(self, monkeypatch) -> None:
         """Two different offsets mean no single offset exists. Averaging them
-        would produce a number that is wrong in both places."""
+        would produce a number that is wrong in both places.
+
+        Both shifts stay inside the search range on purpose: a shift outside it
+        is a window that could not measure, which is a different situation with
+        a different answer.
+        """
         base = shot_curve(30_000, seed=6)
-        # Head shifted by 100, tail by 400: the releases differ structurally.
-        spliced = np.concatenate([base[100:12_000], base[12_400:]])
+        # Head shifted by 100, tail by 250 — a scene missing from the middle.
+        spliced = np.concatenate([base[100:12_000], base[12_150:]])
         self._patch_curves(monkeypatch, base, spliced)
 
         result = align(
@@ -175,6 +180,36 @@ class TestAlign:
         assert result.verdict is Verdict.NO_MATCH
         assert result.offset is None
         assert "disagree" in result.reason
+
+    def test_a_window_that_could_not_measure_is_not_a_window_that_disagreed(
+        self, monkeypatch
+    ) -> None:
+        """Different failures deserve different sentences.
+
+        A window whose correlation surface is flat has not contradicted
+        anything — it read nothing. Folding its argmax into the agreement check
+        reports "the releases differ structurally", which sends the reader to
+        look for a different cut that is not there. The honest answer is that
+        one place in the film could not be read.
+        """
+        base = shot_curve(30_000, seed=13)
+        # The tail is replaced with unrelated footage, so the second window has
+        # nothing to lock onto while the first matches cleanly.
+        noise = shot_curve(16_000, seed=14)
+        spliced = np.concatenate([base[100:14_000], noise])
+        self._patch_curves(monkeypatch, base, spliced)
+
+        result = align(
+            make_info("a.mkv", frames=30_000),
+            make_info("b.mkv", frames=spliced.size),
+            toolbox=None,
+            windows=2,
+        )
+        assert result.verdict is Verdict.NO_MATCH
+        assert "could not measure" in result.reason
+        assert "differ structurally" not in result.reason
+        # The one window that did read something is still reported.
+        assert "+100" in result.reason
 
     def test_unrelated_content_is_refused(self, monkeypatch) -> None:
         """Two films give two windows two unrelated answers, so the refusal

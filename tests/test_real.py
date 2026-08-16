@@ -172,6 +172,34 @@ class TestAlignmentOnRealFootage:
         result = align(a, other, toolbox, max_shift=300, window_frames=500)
         assert not result.usable
 
+    def test_seeking_into_the_middle_lands_on_the_right_frame(self, media: Path, toolbox) -> None:
+        """Everything the two-window rule does rests on this.
+
+        ffmpeg has no frame-index seek, so a window starting at frame N is
+        reached by timestamp. If that landed a frame or two off, the second
+        window would report a different offset than the first and the tool would
+        refuse every real film for a reason that was never true.
+        """
+        import numpy as np
+
+        info = probe(_need(media, "align_a.mkv"), toolbox)
+        whole = luma_curve(info, toolbox, frames=900)
+
+        for start in (1, 7, 40, 137, 200, 401):
+            seeked = luma_curve(info, toolbox, start_frame=start, frames=120)
+            assert np.allclose(seeked[:120], whole[start : start + 120]), f"start={start}"
+
+    def test_a_window_that_reads_nothing_is_reported_as_such(self, media: Path, toolbox) -> None:
+        """A short window over a quiet stretch measures nothing, and saying the
+        releases differ structurally would be a diagnosis of something else."""
+        a = probe(_need(media, "align_a.mkv"), toolbox)
+        b = probe(_need(media, "align_b.mkv"), toolbox)
+
+        result = align(a, b, toolbox, windows=2, max_shift=300, window_frames=200)
+        assert len(result.windows) == 2
+        assert not result.usable
+        assert "could not measure" in result.reason
+
     def test_refuses_when_the_offset_lies_outside_the_search(self, media: Path, toolbox) -> None:
         """A peak on the wall of the search range is not an answer."""
         a = probe(_need(media, "align_a.mkv"), toolbox)

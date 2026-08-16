@@ -339,8 +339,6 @@ def align(
         )
 
     best = min(results, key=lambda r: r.confidence)
-    offsets = {r.offset for r in results}
-    spread = max(offsets) - min(offsets)
 
     # A peak sitting on the wall of the search range is not a peak, it is the
     # edge of what was looked at. Reporting it as an answer is how a search that
@@ -359,8 +357,48 @@ def align(
             ),
         )
 
-    if len(results) > 1 and spread > WINDOW_AGREEMENT_FRAMES:
-        detail = ", ".join(f"frame {r.start_frame}: {r.offset:+d}" for r in results)
+    # A window that could not find a peak has not disagreed with anything — it
+    # has failed to measure. Rolling its argmax into the agreement check turns
+    # "one place in the film was too flat to read" into "these are different
+    # cuts", which sends the user to fix something that is not broken.
+    measured = [r for r in results if r.confidence >= CONFIDENCE_SUSPECT]
+    unmeasured = [r for r in results if r.confidence < CONFIDENCE_SUSPECT]
+
+    if not measured:
+        detail = ", ".join(f"frame {r.start_frame}: {r.confidence:.2f}" for r in results)
+        return Alignment(
+            offset=None,
+            verdict=Verdict.NO_MATCH,
+            confidence=best.confidence,
+            windows=tuple(results),
+            reason=(
+                f"no window found a peak distinguishable from the noise floor "
+                f"(confidence by window — {detail}; need {CONFIDENCE_SUSPECT}). "
+                "These are probably not the same content."
+            ),
+        )
+
+    if unmeasured:
+        found = ", ".join(f"frame {r.start_frame}: {r.offset:+d}" for r in measured)
+        failed = ", ".join(f"frame {r.start_frame}: {r.confidence:.2f}" for r in unmeasured)
+        return Alignment(
+            offset=measured[0].offset,
+            verdict=Verdict.NO_MATCH,
+            confidence=best.confidence,
+            windows=tuple(results),
+            reason=(
+                f"{len(unmeasured)} of {len(results)} windows could not measure an "
+                f"offset ({failed}), so there is nothing to confirm the one that did "
+                f"({found}) against. Try a longer window, or a different part of the "
+                "film: a stretch with few scene cuts gives the correlation nothing to "
+                "lock onto."
+            ),
+        )
+
+    measured_offsets = {r.offset for r in measured}
+    spread = max(measured_offsets) - min(measured_offsets)
+    if len(measured) > 1 and spread > WINDOW_AGREEMENT_FRAMES:
+        detail = ", ".join(f"frame {r.start_frame}: {r.offset:+d}" for r in measured)
         return Alignment(
             offset=None,
             verdict=Verdict.NO_MATCH,
@@ -373,19 +411,9 @@ def align(
             ),
         )
 
-    offset = results[0].offset
-    if best.confidence < CONFIDENCE_SUSPECT:
-        return Alignment(
-            offset=offset,
-            verdict=Verdict.NO_MATCH,
-            confidence=best.confidence,
-            windows=tuple(results),
-            reason=(
-                f"correlation peak is not distinguishable from the noise floor "
-                f"(confidence {best.confidence:.2f}, need {CONFIDENCE_SUSPECT}). "
-                "These are probably not the same content."
-            ),
-        )
+    # Every window measured something and they agree, so the answer is the one
+    # they agree on; how much to trust it is the weakest window's business.
+    offset = measured[0].offset
     if best.confidence < CONFIDENCE_RELIABLE:
         return Alignment(
             offset=offset,
@@ -402,7 +430,11 @@ def align(
         verdict=Verdict.RELIABLE,
         confidence=best.confidence,
         windows=tuple(results),
-        reason=f"{len(results)} windows agree on {offset:+d} frames",
+        reason=(
+            f"{len(results)} window"
+            + ("s" if len(results) != 1 else "")
+            + f" agree on {offset:+d} frames"
+        ),
     )
 
 
