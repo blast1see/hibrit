@@ -32,17 +32,11 @@ jobs:
 
       - run: pip install -e ".[build]"
 
-      # Before the slow part: refuse a tag that disagrees with the packaged
-      # version. Finding that out after the build is finding it out too late.
-      - name: The tag and the package agree on the version
-        shell: pwsh
-        run: |
-          $tag = "${{ inputs.tag || github.ref_name }}" -replace '^v', ''
-          $packaged = python -c "import hibrit; print(hibrit.__version__)"
-          if ($tag -ne $packaged) {
-            throw "tag says $tag, package says $packaged"
-          }
-          Write-Output "both say $packaged"
+      # Before the slow part: this refuses a tag that disagrees with the
+      # packaged version, or a version the changelog says nothing about.
+      # Finding either out after the build is finding it out too late.
+      - name: The notes, and the checks that come with them
+        run: python packaging/release_notes.py ${{ inputs.tag || github.ref_name }} notes.md
 
       - run: pyinstaller --noconfirm hibrit.spec
 
@@ -70,4 +64,4 @@ jobs:
           "${{ steps.archive.outputs.name }}"
           "${{ steps.archive.outputs.name }}.sha256"
           --title "hibrit ${{ inputs.tag || github.ref_name }}"
-          --notes "dovi_tool and hdr10plus_tool are not bundled. Run 'hibrit doctor' after unzipping to see what to download."
+          --notes-file notes.md

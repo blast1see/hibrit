@@ -26,7 +26,6 @@ from hibrit.align import Alignment, align, edit_config_for_offset
 from hibrit.hdr10plus import Hdr10PlusTool, read_json
 from hibrit.matroska import extract_video, remux
 from hibrit.planner import Kind, Plan
-from hibrit.probe import probe
 from hibrit.rpu import DoviTool
 from hibrit.tools import Toolbox
 
@@ -271,20 +270,3 @@ def run(
         clean_target_stream=clean_stream,
         log=log,
     )
-
-
-def plan_and_run(
-    source_path: Path,
-    target_path: Path,
-    output: Path,
-    *,
-    workdir: Path,
-    toolbox: Toolbox | None = None,
-    **kwargs: object,
-) -> Result:
-    """Probe both files, build a plan, and run it. Convenience for the CLI."""
-    from hibrit.planner import build_plan
-
-    box = toolbox or Toolbox()
-    plan = build_plan(probe(Path(source_path), box), probe(Path(target_path), box))
-    return run(plan, Path(output), workdir=Path(workdir), toolbox=box, **kwargs)  # type: ignore[arg-type]

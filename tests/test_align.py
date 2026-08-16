@@ -241,3 +241,23 @@ class TestVerdict:
 
         result = Alignment(offset=5, verdict=Verdict.SUSPECT, confidence=2.0, windows=(), reason="")
         assert not result.usable
+
+    def test_a_rejected_result_does_not_lead_with_its_number(self) -> None:
+        """Whatever is printed first is what gets used.
+
+        A refusal that opens with "offset -115 frames" hands the reader the
+        figure and files the refusal underneath it — which is the habit this
+        whole project is arranged against.
+        """
+        from hibrit.align import Alignment
+
+        rejected = Alignment(
+            offset=-115, verdict=Verdict.NO_MATCH, confidence=1.04, windows=(), reason="x"
+        ).describe()
+        assert rejected.startswith("no_match")
+        assert "best candidate" in rejected
+
+        trusted = Alignment(
+            offset=137, verdict=Verdict.RELIABLE, confidence=3.74, windows=(), reason="x"
+        ).describe()
+        assert trusted.startswith("offset +137")
