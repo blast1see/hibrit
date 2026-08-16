@@ -256,3 +256,122 @@ class TestAsk:
             offset=10, verdict=Verdict.RELIABLE, confidence=5.0, windows=(), reason="ok"
         )
         assert cli._ask(result) is accepted
+
+
+class TestReportingCommands:
+    """doctor, probe and align: what they print and what they exit with."""
+
+    @pytest.fixture
+    def two_files(self, tmp_path):
+        """Paths that exist, since these commands check before they probe."""
+        paths = [tmp_path / "a.mkv", tmp_path / "b.mkv"]
+        for path in paths:
+            path.write_bytes(b"x")
+        return [str(p) for p in paths]
+
+    def test_doctor_exits_zero_when_everything_required_is_present(self, capsys) -> None:
+        from hibrit.tools import KNOWN_TOOLS, REQUIRED_TOOLS, ToolStatus
+
+        statuses = [
+            ToolStatus(name, Path(f"/somewhere/{name}"), f"{name} 1.0", name in REQUIRED_TOOLS)
+            for name in KNOWN_TOOLS
+        ]
+        args = cli.build_parser().parse_args(["doctor"])
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(cli.Toolbox, "doctor", lambda _self: statuses)
+            assert cli.cmd_doctor(args) == 0
+        out = capsys.readouterr().out
+        assert "dovi_tool 1.0" in out
+        assert "MISSING" not in out
+
+    def test_doctor_exits_one_and_says_where_to_get_what_is_missing(self, capsys) -> None:
+        """The exit code is what a setup script reads; the URLs are what a
+        person reads. Both have to be there."""
+        from hibrit.tools import KNOWN_TOOLS, REQUIRED_TOOLS, ToolStatus
+
+        statuses = [
+            ToolStatus(
+                name, None if name == "dovi_tool" else Path("/x"), None, name in REQUIRED_TOOLS
+            )
+            for name in KNOWN_TOOLS
+        ]
+        args = cli.build_parser().parse_args(["doctor"])
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(cli.Toolbox, "doctor", lambda _self: statuses)
+            assert cli.cmd_doctor(args) == 1
+        out = capsys.readouterr().out
+        assert "MISSING" in out
+        assert "github.com/quietvoid/dovi_tool" in out
+
+    def test_probe_prints_what_each_file_carries(self, capsys, monkeypatch, two_files) -> None:
+        monkeypatch.setattr(
+            cli, "probe", lambda path, box: make_info(str(path), dv=True, dv_profile=8)
+        )
+        args = cli.build_parser().parse_args(["probe", *two_files])
+        assert cli.cmd_probe(args) == 0
+        out = capsys.readouterr().out
+        # "P8", not "P8.1": without a compatibility string there is no way to
+        # tell 8.1 from 8.4, and saying which would be a guess.
+        assert out.count("DV P8 ") == 2
+
+    def test_probe_verbose_adds_the_numbers_alignment_needs(
+        self, capsys, monkeypatch, two_files
+    ) -> None:
+        monkeypatch.setattr(
+            cli,
+            "probe",
+            lambda path, box: make_info(str(path), dv=True, dv_profile=8, frames=147_624),
+        )
+        args = cli.build_parser().parse_args(["probe", "-v", two_files[0]])
+        assert cli.cmd_probe(args) == 0
+        out = capsys.readouterr().out
+        assert "147624" in out
+        assert "rate:" in out
+
+    def test_align_exit_code_follows_the_verdict(self, monkeypatch, capsys, two_files) -> None:
+        """A script has only the exit code. A refusal must not read as success."""
+        from hibrit.align import Alignment, Verdict
+
+        monkeypatch.setattr(cli, "probe", lambda path, box: make_info(str(path), frames=1000))
+
+        def result(verdict):
+            return Alignment(
+                offset=137, verdict=verdict, confidence=3.0, windows=(), reason="because"
+            )
+
+        args = cli.build_parser().parse_args(["align", *two_files])
+
+        monkeypatch.setattr(cli, "align", lambda *_a, **_k: result(Verdict.RELIABLE))
+        assert cli.cmd_align(args) == 0
+
+        monkeypatch.setattr(cli, "align", lambda *_a, **_k: result(Verdict.NO_MATCH))
+        assert cli.cmd_align(args) == 1
+
+        monkeypatch.setattr(cli, "align", lambda *_a, **_k: result(Verdict.SUSPECT))
+        assert cli.cmd_align(args) == 1, "a weak peak is not a pass"
+        capsys.readouterr()
+
+    def test_align_prints_every_window_not_just_the_summary(
+        self, monkeypatch, capsys, two_files
+    ) -> None:
+        from hibrit.align import Alignment, Verdict, WindowResult
+
+        monkeypatch.setattr(cli, "probe", lambda path, box: make_info(str(path), frames=100_000))
+        windows = (
+            WindowResult(start_frame=0, frames=9000, offset=137, confidence=3.1, peak_score=0.8),
+            WindowResult(
+                start_frame=50_000, frames=9000, offset=137, confidence=2.9, peak_score=0.7
+            ),
+        )
+        monkeypatch.setattr(
+            cli,
+            "align",
+            lambda *_a, **_k: Alignment(
+                offset=137, verdict=Verdict.RELIABLE, confidence=2.9, windows=windows, reason="ok"
+            ),
+        )
+        args = cli.build_parser().parse_args(["align", *two_files])
+        assert cli.cmd_align(args) == 0
+        out = capsys.readouterr().out
+        assert "window at frame 0" in out
+        assert "window at frame 50000" in out
