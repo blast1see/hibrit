@@ -140,8 +140,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     box = _toolbox(args)
     plan = build_plan(
-        probe(Path(args.source), box),
-        probe(Path(args.target), box),
+        probe(_existing(args.source, "source"), box),
+        probe(_existing(args.target, "target"), box),
         replace_existing=args.replace,
     )
     print(plan.describe())
@@ -163,6 +163,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         workdir=Path(args.workdir),
         toolbox=box,
         progress=lambda message: print(f"  {message}"),
+        # --yes means "do not ask me", not "ignore your own checks". Leaving
+        # approve unset makes the pipeline fall back to requiring a reliable
+        # alignment, so an unattended run refuses a bad offset rather than
+        # writing the exact file this program exists to prevent.
         approve=None if args.yes else _ask,
         keep_intermediates=args.keep,
     )
