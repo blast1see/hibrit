@@ -20,6 +20,7 @@ from hibrit.tools import (
     MissingTool,
     Toolbox,
     ToolStatus,
+    decode_output,
     parse_version,
 )
 
@@ -71,6 +72,44 @@ class TestRequire:
             box.require("definitely_not_installed")
         assert caught.value.name == "definitely_not_installed"
         assert "hibrit doctor" in str(caught.value)
+
+
+class TestDecodeOutput:
+    """The toolchain does not agree on an encoding, so hibrit must not assume."""
+
+    # The Turkish letters here and below are the point of these tests, not
+    # typos for their ASCII lookalikes — they are exactly what was being lost.
+    TURKISH = "Dağ (2012) çıkarılıyor"  # noqa: RUF001
+
+    def test_utf8_is_read_as_utf8(self) -> None:
+        assert decode_output(self.TURKISH.encode("utf-8")) == self.TURKISH
+
+    def test_console_codepage_output_is_not_thrown_away(self) -> None:
+        """Measured, not imagined.
+
+        mkvextract's progress line arrived as b"\\xddlerleme: 0%". 0xDD is not
+        valid UTF-8, so decoding it as UTF-8 with errors="replace" turned the
+        first letter into a replacement character.
+
+        The fallback is passed in rather than read from the environment: this
+        machine's console is cp1254 and a CI runner's is UTF-8, and a test that
+        quietly depends on which one it is running on is a test that passes for
+        the wrong reason.
+        """
+        decoded = decode_output(b"\xddlerleme: 42%", fallback="cp1254")
+        assert decoded == "İlerleme: 42%"
+
+    def test_ascii_is_unaffected(self) -> None:
+        assert decode_output(b"Progress: 100%") == "Progress: 100%"
+
+    def test_nothing_is_ever_lost_even_when_nothing_fits(self) -> None:
+        """A log line is never worth crashing a finished job over, and a byte
+        that cannot be interpreted is still a byte worth keeping."""
+        raw = b"\x00\xff\xfe rubbish"
+        assert decode_output(raw, fallback="utf-8").encode("latin-1") == raw
+
+    def test_an_unknown_fallback_encoding_does_not_crash(self) -> None:
+        assert decode_output(b"\xdd", fallback="no-such-codec") is not None
 
 
 class TestParseVersion:

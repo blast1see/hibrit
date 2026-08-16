@@ -18,6 +18,7 @@ the caller gets a :class:`MissingTool` error naming it.
 
 from __future__ import annotations
 
+import locale
 import os
 import re
 import shutil
@@ -95,6 +96,42 @@ _VERSION = re.compile(r"v?\d+(?:\.\d+)+|\d{4}-\d{2}-\d{2}")
 #: Where a version line turns into boilerplate. ffmpeg prints its copyright on
 #: the same line as its version and the copyright is four times as long.
 _NOISE = re.compile(r"\s+(?:Copyright|copyright)\b.*$")
+
+
+def console_encoding() -> str:
+    """What the console this process was started from writes in."""
+    return locale.getpreferredencoding(False)
+
+
+def decode_output(raw: bytes, *, fallback: str | None = None) -> str:
+    """Decode a line of tool output without losing characters.
+
+    The toolchain is mixed. dovi_tool and hdr10plus_tool are Rust programs and
+    emit UTF-8 whatever the console is set to; mkvtoolnix on Windows writes in
+    the console code page. Forcing UTF-8 on the latter throws away every
+    non-ASCII character: measured here, mkvextract's progress line arrived as
+    ``b"\\xddlerleme: 0%"`` — 0xDD is not valid UTF-8, so ``errors="replace"``
+    turned it into a replacement character and the log went to mojibake.
+
+    Paths matter more than progress lines. This library has files like
+    ``Dag (2012)...mkv`` with Turkish letters in the name, and a tool echoing
+    one back should not come out mangled in a log somebody is reading to work
+    out what went wrong.
+
+    UTF-8 first, because it is right for most of these tools and never guesses
+    wrong — invalid UTF-8 is detectable. Then the console encoding. Then
+    latin-1, which maps all 256 byte values and so cannot fail: the last
+    resort is a wrong letter, never a lost one, and never an exception in the
+    middle of a finished job.
+    """
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return raw.decode(fallback or console_encoding())
+    except (UnicodeDecodeError, LookupError):
+        return raw.decode("latin-1")
 
 
 def parse_version(text: str) -> str | None:
@@ -203,13 +240,19 @@ class Toolbox:
         argv = [str(exe), *[str(a) for a in args]]
 
         if on_output is None:
-            proc = subprocess.run(
+            # Captured as bytes and decoded here rather than by subprocess, so
+            # that a tool writing in the console code page survives. See
+            # decode_output.
+            raw = subprocess.run(
                 argv,
                 capture_output=capture,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 cwd=str(cwd) if cwd else None,
+            )
+            proc = subprocess.CompletedProcess(
+                argv,
+                raw.returncode,
+                decode_output(raw.stdout or b""),
+                decode_output(raw.stderr or b""),
             )
         else:
             proc = self._run_streaming(argv, cwd, on_output)
@@ -230,22 +273,21 @@ class Toolbox:
         and defeat the point.
         """
         collected: list[str] = []
-        partial = ""
+        partial = b""
 
-        def emit(line: str) -> None:
-            text = line.strip()
+        def emit(raw: bytes) -> None:
+            text = decode_output(raw).strip()
             if text:
                 collected.append(text)
                 on_output(text)
 
+        # Read bytes, split on line breaks, decode whole lines. Decoding chunks
+        # would cut multi-byte characters in half at arbitrary boundaries.
         with subprocess.Popen(
             argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
+            bufsize=0,
             cwd=str(cwd) if cwd else None,
         ) as process:
             assert process.stdout is not None
@@ -254,8 +296,8 @@ class Toolbox:
                 if not chunk:
                     break
                 partial += chunk
-                partial = partial.replace("\r\n", "\n").replace("\r", "\n")
-                *lines, partial = partial.split("\n")
+                partial = partial.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                *lines, partial = partial.split(b"\n")
                 for line in lines:
                     emit(line)
             emit(partial)
