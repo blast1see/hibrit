@@ -14,7 +14,15 @@ Two kinds of check:
   data changed. It needs the target's pre-injection video stream, which the
   pipeline keeps for exactly this purpose.
 
-Neither rewrites anything, so verification costs reads rather than copies.
+The metadata checks cost a pass over the output and write only the few megabytes
+they read back. The picture check is not free: the result is a Matroska file and
+:func:`picture_digest` needs Annex B, so its video track is extracted first —
+another full copy of the stream, about 68 GB for a 70 GB output.
+
+That could be avoided only by verifying something other than the finished file,
+which would not be verification. It is budgeted for instead: the peak during
+this check matches the peak during the run, so
+:data:`hibrit.pipeline.SPACE_FACTOR` covers both.
 """
 
 from __future__ import annotations

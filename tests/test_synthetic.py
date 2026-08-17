@@ -1097,3 +1097,83 @@ class TestTrackLabelling:
         assert audio_tracks[0]["properties"]["track_name"] == "Turkish"
         assert audio_tracks[0]["properties"]["language"] == "tur"
         assert payload.get("chapters"), "the donor's chapters were dropped"
+
+
+class TestVerificationCosts:
+    """What the picture check actually spends, as opposed to what it claimed.
+
+    verify.py used to state that neither kind of check rewrites anything. The
+    metadata checks do not. The picture check does: the result is Matroska,
+    picture_digest needs Annex B, so the finished file's video track is
+    extracted first — another full copy. On a 70 GB output that is 68 GB, and
+    it lands in the same working directory the run just used.
+    """
+
+    def test_the_picture_check_writes_a_copy_of_the_stream(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        from hibrit.verify import verify
+
+        dovi = DoviTool(toolbox)
+        injected = dovi.inject_rpu(hdr10_clip, synthetic_rpu, tmp_path / "dv.hevc")
+        result = tmp_path / "out.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(result), str(injected)], check=False)
+
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        report = verify(
+            result,
+            rpu=synthetic_rpu,
+            clean_target_stream=hdr10_clip,
+            workdir=workdir,
+            toolbox=toolbox,
+        )
+        assert report.passed, report.describe()
+
+        # It cleans up after itself, so measure the peak by watching the call
+        # rather than the aftermath.
+        assert not list(workdir.glob("verify_result.hevc"))
+
+    def test_the_peak_is_what_the_space_factor_was_sized_for(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The claim SPACE_FACTOR now records, checked rather than asserted.
+
+        Anyone trimming the factor because "verification is only reads" would
+        make a job that runs and then cannot verify itself.
+        """
+        from hibrit import verify as verify_module
+        from hibrit.verify import verify
+
+        dovi = DoviTool(toolbox)
+        injected = dovi.inject_rpu(hdr10_clip, synthetic_rpu, tmp_path / "dv.hevc")
+        result = tmp_path / "out.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(result), str(injected)], check=False)
+
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        seen: list[int] = []
+        real_digest = verify_module.picture_digest
+
+        def watching(path, **kwargs):
+            # Called once the extraction has happened; this is the moment the
+            # working directory is fullest.
+            seen.append(sum(p.stat().st_size for p in workdir.glob("*") if p.is_file()))
+            return real_digest(path, **kwargs)
+
+        verify_module.picture_digest = watching
+        try:
+            verify(
+                result,
+                clean_target_stream=hdr10_clip,
+                workdir=workdir,
+                toolbox=toolbox,
+            )
+        finally:
+            verify_module.picture_digest = real_digest
+
+        assert seen, "the picture check did not run"
+        assert max(seen) >= result.stat().st_size * 0.5, (
+            "the extraction did not happen — if this is now free, SPACE_FACTOR "
+            "and the comment on it can both be revisited"
+        )

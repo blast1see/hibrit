@@ -40,6 +40,12 @@ from hibrit.tools import Toolbox
 #: result alongside what remains. For a 72 GB target the peak measures about
 #: 208 GB, so three times over is the requirement with a little room, not a
 #: guess.
+#:
+#: Verification reaches the same peak by a different route, which is worth
+#: knowing before anyone trims this: the picture check must extract the finished
+#: file's video track before it can hash it, so the kept target stream, the
+#: output and that extraction coexist. Freeing the target stream earlier would
+#: lower the run's peak and leave verification unable to fit.
 SPACE_FACTOR = 3.0
 
 #: Callbacks. ``Progress`` is told what is happening; ``Approve`` is asked
