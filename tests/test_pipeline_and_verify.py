@@ -380,7 +380,7 @@ class TestContainerSignalling:
 class TestStaleLabels:
     """Release groups write the metadata into the video track's name.
 
-    A real remux on this machine carries "MPEG-H HEVC Video / 59681 kbps /
+    A real remux carries "MPEG-H HEVC Video / 59681 kbps /
     2160p / ... / HDR10+ Profile B / Dolby Vision MEL @ 69 kbps". Convert that
     to single-layer 8.1 and the label is wrong. Editing someone's label is not
     this program's business and leaving a false one is worse than dropping it,

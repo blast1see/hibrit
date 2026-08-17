@@ -287,8 +287,8 @@ def build_plan(
             # which it is, and hibrit reads that when it extracts — before then,
             # the honest answer is that it does not know yet.
             #
-            # Measured across this library's 106 profile 7 remuxes: 64 FEL, 42
-            # MEL. So the losing case is the likely one, which is why this is a
+            # Measured across a sample of 106 profile 7 remuxes: 64 FEL, 42 MEL.
+            # So the losing case is the likely one, which is why this is a
             # warning rather than a note.
             notes.append(
                 Note(
@@ -298,8 +298,8 @@ def build_plan(
                     "layer: a minimal one (MEL) carries no picture correction and is "
                     "lost for free, a full one (FEL) carries luma and chroma mapping "
                     "that is discarded. The container does not record which — the RPU "
-                    "does, and it will be reported once extracted. In this library the "
-                    "split runs about 60/40 towards FEL.",
+                    "does, and it will be reported once extracted. On a sample of real "
+                    "remuxes the split ran about 60/40 towards FEL.",
                 )
             )
         elif profile == 8:

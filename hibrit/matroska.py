@@ -39,8 +39,8 @@ def video_track_id(info: VideoInfo) -> int:
     is what mkvmerge and mkvextract call the track ID. Its ``ID`` field is
     1-based for Matroska and would be off by one.
 
-    In practice this always returns 0: across the 302 remuxes and WEB-DLs on
-    this machine, every single one has its video at StreamOrder 0. So this is
+    In practice this always returns 0: across a 302-file sample of remuxes and
+    WEB-DLs, every single one had its video at StreamOrder 0. So this is
     cheap insurance rather than a live path — and it is safe insurance, because
     a wrong guess makes mkvextract write nothing and :func:`extract_video`
     raise, rather than quietly extracting an audio track.
@@ -123,8 +123,7 @@ def video_track_properties(source: Path, toolbox: Toolbox | None = None) -> list
 def stale_label_warning(name: str | None, result: VideoInfo) -> str | None:
     """Say so when a preserved track name no longer describes the track.
 
-    Release groups write the metadata into the video track's name. A real remux
-    on this machine carries::
+    Release groups write the metadata into the video track's name. A real remux carries::
 
         MPEG-H HEVC Video / 59681 kbps / 2160p / ... / HDR10+ Profile B /
         Dolby Vision MEL @ 69 kbps

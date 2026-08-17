@@ -59,8 +59,8 @@ Summary:
   L9 MDP: DCI-P3 D65
 """
 
-#: A real profile 7 **FEL** remux — Okja. Note the trimmed L2 (one target where
-#: the MEL clip has three) and a MaxCLL of 10000 nits, which is what a full
+#: A real profile 7 **FEL** remux. Note the single L2 target where the MEL clip
+#: has three and a MaxCLL of 10000 nits, which is what a full
 #: enhancement layer looks like.
 DOVI_INFO_P7_FEL = """\
 Parsing RPU file...
@@ -77,8 +77,9 @@ Summary:
   L2 trims: 100 nits
 """
 
-#: `dovi_tool generate -p 5`. Kept because it is the only profile 5 available
-#: anywhere on this machine.
+#: `dovi_tool generate -p 5`. Kept because a survey of 302 real remuxes and
+#: WEB-DLs turned up no profile 5 at all — release groups convert it before
+#: packaging — so a generated one is the only sample there is.
 DOVI_INFO_P5 = """\
 Parsing RPU file...
 
@@ -136,14 +137,14 @@ class TestParseInfo:
     def test_fel_is_read_from_a_real_fel_file(self) -> None:
         """This used to be a hand-edited word, and said so.
 
-        The claim was that every profile 7 clip here is MEL — true of the one
-        clip I had. Surveying the whole library found five FEL remuxes (Avatar,
-        Okja, Ran, Saving Private Ryan, Top Gun Maverick), so the sample above
-        is now dovi_tool's output on Okja rather than my edit of the MEL one.
+        The claim was that every profile 7 sample available was MEL — true of
+        the one clip on hand. Surveying 302 real files found 64 FEL against 42
+        MEL, so the sample above is dovi_tool's output on one of them rather
+        than an edit of the MEL one.
 
         It matters beyond tidiness: converting FEL to 8.1 discards a real
-        enhancement layer, and the planner warns about that on files this user
-        actually owns.
+        enhancement layer, and it is the majority case rather than the corner
+        it was assumed to be.
         """
         info = rpu_mod.parse_info(DOVI_INFO_P7_FEL)
         assert info.profile == 7

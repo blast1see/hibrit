@@ -400,8 +400,8 @@ class TestEndToEnd:
 class TestAwkwardFilenames:
     """Names with characters outside ASCII, on the platform that mangles them.
 
-    This library is full of them — ``Dağ (2012)...mkv``,
-    ``Babam.ve.Oglum.2005...mkv`` — and every one of these tools is a separate
+    Release names carry them constantly — Turkish, Nordic, Central European —
+    and every one of these tools is a separate
     program receiving the path as an argument and printing it back in its own
     encoding. A failure here would meet the user on their first real file.
     """

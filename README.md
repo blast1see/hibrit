@@ -185,9 +185,8 @@ remux joins them. Traced on a 72 GB remux, the peak comes to about 208 GB — so
 **three times the target's size** is the requirement.
 
 `--workdir` is required rather than defaulted for exactly this reason: the drive
-holding your sources is usually the one without the room. On the machine this
-was written for, a 72 GB job is refused on both the source drive (42 GB free)
-and the system drive (193 GB), and accepted on the one with space. Free space is
+holding your sources is usually the one without the room. Checked against real volumes: a 72 GB job is refused on a drive with 42 GB free
+and on one with 193 GB, and accepted on one with room. Free space is
 checked before the first command runs, and each intermediate is deleted as soon
 as the next step has consumed it.
 
@@ -232,8 +231,8 @@ dual-layer structure as dual-layer.
 That last one is a real cost more often than it sounds. A profile 7 enhancement
 layer comes in two kinds: a minimal one (MEL) carries no picture correction and
 is lost for free, a full one (FEL) carries luma and chroma mapping that
-converting discards. Measured across the 106 profile 7 remuxes on the machine
-this was written for: **64 FEL to 42 MEL** — the losing case is the common one.
+converting discards. Measured across a sample of 106 profile 7 remuxes: **64 FEL to 42 MEL** — the
+losing case is the common one.
 
 Nothing in the container distinguishes them; MediaInfo reports both as
 `BL+EL+RPU`. The RPU says, so `hibrit plan` declines to guess and the run

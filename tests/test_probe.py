@@ -247,9 +247,9 @@ class TestStandardRates:
 class TestRoundedRationals:
     """An exact-looking pair is not the same as an exact rate.
 
-    Found by probing all 302 remuxes and WEB-DLs on this machine rather than the
-    handful the fixtures were built from: one of them, Alien.1979.Directors.Cut,
-    reports FrameRate_Num 23976 / FrameRate_Den 1000. That is a rational, and it
+    Found by probing 302 real remuxes and WEB-DLs rather than the handful the
+    fixtures were built from: one of them reports FrameRate_Num 23976 /
+    FrameRate_Den 1000. That is a rational, and it
     is a rounding — 23.976000 where the real rate is 24000/1001 = 23.976024.
     Trusting the pair because it was a pair was the mistake.
     """
