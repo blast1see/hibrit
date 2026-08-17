@@ -224,6 +224,29 @@ byte-for-byte intact, and describing something else.
 `hibrit plan` states this assumption every single time, because it is the one
 thing the user has to decide and the tool cannot.
 
+### Its everyday cousin: the cropped source
+
+A streaming release is usually cropped to its own picture while the disc keeps
+the bars inside the frame — 3840x1606 against 3840x2160 for the same 2.40:1
+film. Same title, same edit, different shape, and the mismatch means different
+things depending on what is moving:
+
+| Moving | Why it matters | Way through |
+|---|---|---|
+| Dolby Vision RPU | level 5 offsets point at rows the target frame does not have | none |
+| HDR10+ | its per-frame values measure the frame the encoder saw, and a quarter of the target's rows are black bar that was never in it | `--allow-crop` |
+
+The first is misplaced geometry and the second is a measurement taken
+elsewhere, which is why one can be knowingly accepted and the other cannot.
+`--allow-crop` covers only the second, and says plainly that the transfer will
+finish and every check will pass — the metadata stays internally consistent and
+only disagrees with the picture it is now attached to.
+
+Rewriting the offsets to the target's geometry is the real fix for the first
+case. `dovi_tool editor` does it through an `active_area` config; hibrit does
+not, because the correct offsets are a property of the target's bars and this
+program does not guess.
+
 ## Scope
 
 **Does:** move existing Dolby Vision RPUs and HDR10+ metadata between releases,
