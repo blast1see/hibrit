@@ -254,6 +254,20 @@ pytest -q -m gui                        # drives the window; needs a display
 pytest -q                               # everything but the window
 ```
 
+Two environment variables decide how much of the `real` tier can run:
+
+| Variable | Points at | Without it |
+|---|---|---|
+| `HIBRIT_MEDIA` | the directory holding the sample clips | the whole tier skips |
+| `HIBRIT_FEL` | any profile 7 **FEL** remux | three tests skip |
+
+`HIBRIT_FEL` is separate because no synthesised sample can stand in for it:
+`dovi_tool generate` writes profiles 5, 8.1 and 8.4, and a FEL enhancement layer
+is not among them. Those three tests spent their whole life skipped, and one of
+them was asserting wording the planner had stopped producing — which nothing
+noticed, because a skipped test reports success just as quietly as a passing
+one. Point the variable at a real FEL film before trusting that tier.
+
 The `tools` tier needs no media: `dovi_tool generate` writes an RPU from a JSON
 config with no video involved, and ffmpeg builds a ten-second HDR10 clip in a
 fifth of a second. That is what CI runs — so the code that shells out to the

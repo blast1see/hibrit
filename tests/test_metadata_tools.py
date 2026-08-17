@@ -77,6 +77,28 @@ Summary:
   L2 trims: 100 nits
 """
 
+#: A real **pillarboxed** remux: a 1.66:1 film in a 3840x2160 frame, so its
+#: black bars are at the sides. Every other sample here has left=0, right=0,
+#: which means a bug that swapped the two pairs would have passed all of them.
+#: 3840 - 127 - 127 = 3586, and 3586/2160 = 1.660:1 — the film's own ratio.
+#: That arithmetic is how the offsets were confirmed to be plain pixel counts
+#: in the source frame, which is why the planner treats a resolution mismatch
+#: as a blocker rather than a warning.
+DOVI_INFO_PILLARBOX = """\
+Parsing RPU file...
+
+Summary:
+  Frames: 2500
+  Profile: 8
+  DM version: 1 (CM v2.9)
+  Scene/shot count: 5
+  RPU mastering display: 0.0050/4000 nits
+  RPU content light level (L1): MaxCLL: 3015.34 nits, MaxFALL: 164.74 nits
+  L6 metadata: Mastering display: 0.0050/23040 nits. MaxCLL: 6987 nits, MaxFALL: 1259 nits
+  L5 offsets: top=0, bottom=0, left=127, right=127
+  L2 trims: 100 nits, 600 nits, 1000 nits, 2000 nits
+"""
+
 #: `dovi_tool generate -p 5`. Kept because a survey of 302 real remuxes and
 #: WEB-DLs turned up no profile 5 at all — release groups convert it before
 #: packaging — so a generated one is the only sample there is.
@@ -106,6 +128,19 @@ class TestParseInfo:
         assert info.scene_count == 4
         assert info.l5_offsets == (276, 277, 0, 0)
         assert info.dm_version == "1 (CM v2.9)"
+
+    def test_side_offsets_are_not_confused_with_top_and_bottom(self) -> None:
+        """A pillarboxed film puts its bars in the other pair of fields.
+
+        Worth its own test because until this sample was added every fixture
+        had left=0 and right=0, so nothing distinguished a correct parser from
+        one that read the four numbers in the wrong order.
+        """
+        info = rpu_mod.parse_info(DOVI_INFO_PILLARBOX)
+        assert info.l5_offsets == (0, 0, 127, 127)
+
+        top, bottom, left, right = info.l5_offsets
+        assert (3840 - left - right, 2160 - top - bottom) == (3586, 2160)
 
     def test_a_two_version_dm_header_with_sub_lines(self) -> None:
         """The shape the invented sample got wrong.

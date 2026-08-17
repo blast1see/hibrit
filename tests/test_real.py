@@ -517,15 +517,30 @@ class TestFullEnhancementLayer:
         assert info.profile == 7
         assert info.is_fel, "HIBRIT_FEL points at a MEL file"
 
-    def test_converting_it_to_81_is_reported_as_a_loss(self, fel_source: Path, toolbox) -> None:
-        """The planner's wording for FEL differs from its wording for MEL, and
-        this is the case where the difference is real."""
+    def test_the_planner_does_not_claim_to_know_this_is_fel(
+        self, fel_source: Path, toolbox
+    ) -> None:
+        """Handed a genuine FEL film, the planner still has to say it cannot tell.
+
+        This test used to assert the opposite — that the plan names the loss
+        outright. It was written when the planner did claim to know, kept its
+        old assertion when that claim was removed, and never failed, because
+        HIBRIT_FEL was unset and a skipped test reports nothing. It only spoke
+        up the first time a real FEL film was pointed at it.
+
+        What it locks now is the honest behaviour. MediaInfo reports MEL and FEL
+        identically as ``BL+EL+RPU``, so at planning time — before a single byte
+        of RPU has been read — the difference is genuinely unknown, and saying
+        so is the correct answer. The loss is named later, by the pipeline,
+        after the RPU has been extracted: see
+        :meth:`TestProfile7Reporting.test_a_fel_source_is_reported_as_a_loss`.
+        """
         from conftest import make_info
 
         from hibrit.planner import build_plan
 
         source = probe(fel_source, toolbox)
-        assert source.is_dual_layer
+        assert source.is_dual_layer  # true of MEL as well, which is the point
 
         target = make_info(
             "target.mkv",
@@ -536,8 +551,12 @@ class TestFullEnhancementLayer:
         )
         plan = build_plan(source, target)
         assert plan.convert_mode == 2
+
         text = " ".join(n.text for n in plan.notes)
-        assert "enhancement layer's luma and chroma mapping is discarded" in text
+        assert "depends on the enhancement layer" in text
+        assert "will be reported once extracted" in text
+        # Both outcomes are described; neither is asserted as this file's.
+        assert "MEL" in text and "FEL" in text
 
 
 class TestProfile7Reporting:
