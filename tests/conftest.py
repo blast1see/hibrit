@@ -1,10 +1,13 @@
 """Shared fixtures.
 
-Three tiers of test live here, separated by marker:
+Four tiers of test live here, separated by marker:
 
 * unmarked — pure logic, no binaries, no media. These run everywhere.
-* ``tools`` — needs dovi_tool / hdr10plus_tool / ffmpeg on this machine.
-* ``real`` — needs the large media files the project was developed against.
+* ``tools`` — needs dovi_tool / hdr10plus_tool / ffmpeg installed, and
+  synthesises everything else it uses.
+* ``real`` — needs the sample clips named in ``test_real.py``; point
+  ``HIBRIT_MEDIA`` at the directory holding them.
+* ``gui`` — needs a display.
 
 The split exists because the lesson this project inherited is that unit tests
 alone are not evidence. The unmarked tier proves the code does what it says;
@@ -23,9 +26,12 @@ import pytest
 from hibrit.probe import VideoInfo
 from hibrit.tools import Toolbox
 
-#: Set HIBRIT_MEDIA to a directory holding the sample files to enable the
-#: ``real`` tier. Nothing here downloads anything.
-MEDIA_DIR = Path(os.environ.get("HIBRIT_MEDIA", r"E:\hibrit-calisma"))
+#: Where the ``real`` tier looks for its clips. There is deliberately no
+#: default: a path from one developer's disk baked into a shared test file is
+#: meaningless everywhere else, and worse than meaningless if it happens to
+#: exist and hold something different. Unset means those tests skip, which is
+#: the honest outcome on a machine that does not have the media.
+MEDIA_DIR = Path(os.environ["HIBRIT_MEDIA"]) if os.environ.get("HIBRIT_MEDIA") else None
 
 
 def pytest_collection_modifyitems(config, items) -> None:
@@ -57,8 +63,10 @@ def have_tools(toolbox: Toolbox) -> bool:
 
 @pytest.fixture(scope="session")
 def media() -> Path:
+    if MEDIA_DIR is None:
+        pytest.skip("set HIBRIT_MEDIA to the directory holding the sample clips")
     if not MEDIA_DIR.is_dir():
-        pytest.skip(f"media directory {MEDIA_DIR} not present")
+        pytest.skip(f"HIBRIT_MEDIA points at {MEDIA_DIR}, which is not a directory")
     return MEDIA_DIR
 
 
