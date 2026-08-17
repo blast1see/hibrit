@@ -538,3 +538,97 @@ class TestFullEnhancementLayer:
         assert plan.convert_mode == 2
         text = " ".join(n.text for n in plan.notes)
         assert "enhancement layer's luma and chroma mapping is discarded" in text
+
+
+class TestProfile7Reporting:
+    """The pipeline says which kind of enhancement layer it just converted.
+
+    Added in the same commit that stopped the planner guessing — and then not
+    exercised, which is the exact pattern this run has been hunting. It needs a
+    real profile 7 source: dovi_tool generate makes 5, 8.1 and 8.4, not 7.
+    """
+
+    def test_a_mel_source_is_reported_as_losing_nothing(
+        self, media: Path, toolbox, tmp_path: Path
+    ) -> None:
+        from hibrit.pipeline import run
+        from hibrit.planner import build_plan
+
+        source_mkv = _need(media, "align_other.mkv")  # the profile 7 clip
+        clip = _need(media, "p8_clip.hevc")
+
+        clean = DoviTool(toolbox).remove(clip, tmp_path / "clean.hevc")
+        target_mkv = tmp_path / "target.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(target_mkv), str(clean)], check=False)
+
+        source = probe(source_mkv, toolbox)
+        assert source.dv_profile == 7
+
+        plan = build_plan(source, probe(target_mkv, toolbox))
+        assert plan.convert_mode == 2
+
+        result = run(plan, tmp_path / "out.mkv", workdir=tmp_path / "work", toolbox=toolbox)
+
+        layer_lines = [
+            line for line in result.log if "profile 7 M" in line or "profile 7 F" in line
+        ]
+        assert layer_lines, f"the pipeline said nothing about the layer: {result.log}"
+        assert "MEL" in layer_lines[0]
+        assert "nothing was lost" in layer_lines[0]
+
+        # And the conversion really happened.
+        assert DoviTool(toolbox).info(result.rpu).profile == 8
+
+    def test_a_fel_source_is_reported_as_a_loss(self, toolbox, tmp_path: Path) -> None:
+        """HIBRIT_FEL points at one of the library's 64 FEL remuxes."""
+        import os
+
+        from hibrit.pipeline import run
+        from hibrit.planner import build_plan
+
+        configured = os.environ.get("HIBRIT_FEL")
+        if not configured:
+            pytest.skip("set HIBRIT_FEL to a profile 7 FEL remux")
+        fel = Path(configured)
+        if not fel.exists():
+            pytest.skip(f"{fel} not present")
+
+        # A short target of matching shape, built from the FEL film itself.
+        clip = tmp_path / "clip.hevc"
+        toolbox.run(
+            "ffmpeg",
+            [
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(fel),
+                "-map",
+                "0:v:0",
+                "-frames:v",
+                "600",
+                "-c",
+                "copy",
+                "-bsf:v",
+                "hevc_mp4toannexb",
+                "-f",
+                "hevc",
+                str(clip),
+            ],
+        )
+        source_mkv = tmp_path / "source.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(source_mkv), str(clip)], check=False)
+
+        clean = DoviTool(toolbox).remove(clip, tmp_path / "clean.hevc")
+        target_mkv = tmp_path / "target.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(target_mkv), str(clean)], check=False)
+
+        plan = build_plan(probe(source_mkv, toolbox), probe(target_mkv, toolbox))
+        assert plan.convert_mode == 2
+
+        result = run(plan, tmp_path / "out.mkv", workdir=tmp_path / "work", toolbox=toolbox)
+        notes = [line for line in result.log if "profile 7 FEL" in line]
+        assert notes, f"a FEL source was converted without saying so: {result.log}"
+        assert "discarded" in notes[0]
+        assert "not the full grade" in notes[0]
