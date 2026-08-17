@@ -3,11 +3,15 @@
 Two things shape this module more than the commands do.
 
 **Disk.** A 70 GB remux needs its video stream extracted, injected into, and
-remuxed. That is three copies of a very large file before anything is deleted.
-The machine this was written on has 42 GB free on the drive holding the sources,
-so a run that starts optimistically ends with a half-written file and a full
-disk. Space is therefore checked before the first command, and each intermediate
-is deleted the moment the next step has consumed it.
+remuxed. That is three copies of a very large file before anything is deleted,
+and the drive holding the sources is routinely the one without room for them —
+a run that starts optimistically ends with a half-written file and a full disk.
+
+Space is therefore checked before the first command, and every intermediate is
+deleted as soon as the next step has consumed it, with one deliberate exception:
+the extracted target stream stays, because the picture check needs something to
+compare the output against. It is the largest thing here, so the caller is told
+it is there and decides when it goes.
 
 **Consent.** When the frame counts differ, the metadata has to be retimed, and
 the retiming is a guess until a human has looked at it. The alignment result is

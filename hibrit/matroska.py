@@ -1,9 +1,13 @@
 """Getting HEVC in and out of Matroska.
 
 Both metadata tools read a ``.mkv`` happily when *extracting* — and neither will
-write to one. ``hdr10plus_tool remove`` on a Matroska file answers::
+write to one. Measured on all three commands that rewrite a stream, each
+refusing in its own words and each exiting 1, so the wrappers raise rather than
+carry on::
 
-    Error: Remover: Matroska format unsupported
+    dovi_tool remove        Error: Remover: Matroska input is unsupported
+    dovi_tool inject-rpu    Error: RpuInjector: Must be a raw HEVC bitstream file
+    hdr10plus_tool remove   Error: Remover: Matroska format unsupported
 
 So anything that rewrites the bitstream has to unwrap it first. Matroska stores
 HEVC length-prefixed; ``mkvextract tracks`` writes the Annex B start-code form

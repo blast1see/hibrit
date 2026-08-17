@@ -24,6 +24,7 @@ from hibrit.hdr10plus import Hdr10PlusMismatch, Hdr10PlusTool, read_json
 from hibrit.matroska import extract_video, remux
 from hibrit.probe import probe
 from hibrit.rpu import DoviTool, FrameCountMismatch, parse_info
+from hibrit.tools import ToolFailed
 from hibrit.verify import sha256_file, verify
 
 pytestmark = pytest.mark.tools
@@ -821,6 +822,37 @@ class TestContainer:
         unwrapped = extract_video(wrapped, tmp_path / "unwrapped.hevc", toolbox)
         recovered = dovi.extract_rpu(unwrapped, tmp_path / "back.bin")
         assert sha256_file(recovered) == sha256_file(synthetic_rpu)
+
+    def test_the_tools_refuse_to_rewrite_a_matroska_file(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The reason the unwrap step exists at all, held in place by a test.
+
+        Every command that rewrites a bitstream is handed a ``.mkv`` and has to
+        refuse it. If a future release of either tool learns to write into a
+        container, this test fails — and the unwrap step becomes optional, which
+        would take a copy the size of a film out of every run. That is worth
+        being told about rather than discovering years later.
+        """
+        wrapped = tmp_path / "wrapped.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(wrapped), str(hdr10_clip)], check=False)
+        assert wrapped.exists()
+
+        dovi, plus = DoviTool(toolbox), Hdr10PlusTool(toolbox)
+        attempts = {
+            "dovi_tool remove": lambda: dovi.remove(wrapped, tmp_path / "a.hevc"),
+            "dovi_tool inject-rpu": lambda: dovi.inject_rpu(
+                wrapped, synthetic_rpu, tmp_path / "b.hevc"
+            ),
+            "hdr10plus_tool remove": lambda: plus.remove(wrapped, tmp_path / "c.hevc"),
+        }
+        for name, attempt in attempts.items():
+            with pytest.raises(ToolFailed) as excinfo:
+                attempt()
+            # Each command refuses in its own words, so match on the shared
+            # subject rather than pinning three exact strings that are not ours.
+            message = str(excinfo.value).lower()
+            assert "matroska" in message or "raw hevc bitstream" in message, f"{name}: {message}"
 
     def test_remux_keeps_the_donor_s_other_tracks(
         self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
