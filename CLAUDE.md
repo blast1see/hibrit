@@ -7,8 +7,9 @@ Working rules for this repository.
 hibrit moves Dolby Vision RPUs and HDR10+ metadata from one release of a film
 into another, wrapping `dovi_tool` and `hdr10plus_tool`. It never re-encodes.
 
-Read `README.md` first — it explains the trap the whole design is built around
-(`dovi_tool inject-rpu` pads a mismatched RPU and exits 0).
+Read `README.md` first — it explains the trap the whole design is built around:
+both `dovi_tool inject-rpu` and `hdr10plus_tool inject` pad mismatched metadata
+to length and exit 0.
 
 ## Language
 
@@ -54,7 +55,7 @@ Assume the target is 70 GB and the drive it lives on has 40 GB free.
 
 ## Tests
 
-Three tiers, and the split is deliberate:
+Four tiers, and the split is deliberate:
 
 | Command | Needs | Proves |
 |---|---|---|
