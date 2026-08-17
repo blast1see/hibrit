@@ -23,6 +23,12 @@ DEFAULT_WORKDIR_HINT = (
     "The drive holding your sources usually does not have it."
 )
 
+ALLOW_CROP_HELP = (
+    "accept a source cropped to its picture (a 3840x1606 WEB-DL donating to a "
+    "letterboxed 3840x2160 remux, say). HDR10+ only: it never applies to the "
+    "Dolby Vision RPU, whose level 5 offsets would land on rows that do not exist"
+)
+
 
 def _toolbox(args: argparse.Namespace) -> Toolbox:
     extra = [Path(d) for d in (args.tools_dir or [])]
@@ -91,6 +97,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         probe(Path(args.source), box),
         probe(Path(args.target), box),
         replace_existing=args.replace,
+        allow_crop=args.allow_crop,
     )
     print(plan.describe())
     return 0 if plan.ok else 1
@@ -143,6 +150,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         probe(_existing(args.source, "source"), box),
         probe(_existing(args.target, "target"), box),
         replace_existing=args.replace,
+        allow_crop=args.allow_crop,
     )
     print(plan.describe())
     print()
@@ -246,6 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_cmd.add_argument(
         "--replace", action="store_true", help="overwrite metadata the target has"
     )
+    plan_cmd.add_argument("--allow-crop", action="store_true", help=ALLOW_CROP_HELP)
     plan_cmd.set_defaults(func=cmd_plan)
 
     align_cmd = sub.add_parser("align", help="measure the frame offset between two releases")
@@ -261,6 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument("-o", "--output", required=True)
     run_cmd.add_argument("-w", "--workdir", required=True, help=DEFAULT_WORKDIR_HINT)
     run_cmd.add_argument("--replace", action="store_true")
+    run_cmd.add_argument("--allow-crop", action="store_true", help=ALLOW_CROP_HELP)
     run_cmd.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
     run_cmd.add_argument("-n", "--dry-run", action="store_true", help="print the plan and stop")
     run_cmd.add_argument("--keep", action="store_true", help="keep intermediate files")

@@ -158,12 +158,21 @@ def build_plan(
     *,
     kinds: tuple[Kind, ...] | None = None,
     replace_existing: bool = False,
+    allow_crop: bool = False,
 ) -> Plan:
     """Work out what to do with *source* (metadata donor) and *target* (video to keep).
 
     *kinds* limits what is considered; by default everything the source has and
     the target lacks is moved. *replace_existing* also moves metadata the target
     already carries, overwriting it.
+
+    *allow_crop* accepts a resolution mismatch — the common case being a WEB-DL
+    cropped to its 2.40:1 picture donating to a remux that keeps the bars in the
+    frame. It deliberately does **not** apply when the RPU is moving: there the
+    damage is geometric and total, and no flag should wave it through. Rewriting
+    the level 5 offsets to the target's geometry is possible (``dovi_tool
+    editor`` does it), but hibrit does not do it, so the honest answer is still
+    no.
     """
     notes: list[Note] = []
     wanted = kinds or (Kind.DV, Kind.HDR10PLUS)
@@ -265,7 +274,8 @@ def build_plan(
     # off that frame, or add them back as black, and the same numbers now
     # describe a different set of pixels.
     if source.resolution and target.resolution and source.resolution != target.resolution:
-        if Kind.DV in transfer:
+        moving_rpu = Kind.DV in transfer
+        if moving_rpu:
             why = (
                 "RPU level 5 active-area offsets are counted in pixels of the source "
                 "frame, so the letterbox bars would be placed in the wrong rows"
@@ -276,12 +286,33 @@ def build_plan(
                 "so with a different number of rows in it the same numbers describe a "
                 "different set of pixels"
             )
-        notes.append(
-            Note(
-                Level.BLOCKER,
-                f"resolution differs ({source.resolution} vs {target.resolution}). {why}.",
+        head = f"resolution differs ({source.resolution} vs {target.resolution}). {why}."
+
+        if allow_crop and not moving_rpu:
+            notes.append(
+                Note(
+                    Level.WARNING,
+                    f"{head} Accepted because --allow-crop was passed. The transfer "
+                    "will complete and every check will pass: nothing downstream can "
+                    "measure this, because the metadata is internally consistent and "
+                    "only disagrees with the picture it is now attached to.",
+                )
             )
-        )
+        elif allow_crop:
+            notes.append(
+                Note(
+                    Level.BLOCKER,
+                    f"{head} --allow-crop does not cover this: it accepts measurements "
+                    "taken over a different set of pixels, not offsets pointing at rows "
+                    "that do not exist. Rewriting the level 5 offsets to the target's "
+                    "geometry would be the real fix, and hibrit does not do it.",
+                )
+            )
+        elif moving_rpu:
+            # No flag is offered here on purpose: there is nothing to opt into.
+            notes.append(Note(Level.BLOCKER, head))
+        else:
+            notes.append(Note(Level.BLOCKER, f"{head} Pass --allow-crop to accept this."))
 
     if source.frame_rate and target.frame_rate and source.frame_rate != target.frame_rate:
         notes.append(

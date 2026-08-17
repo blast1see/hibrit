@@ -107,6 +107,43 @@ class TestRefusals:
         assert not plan.ok
         assert "level 5" not in text
         assert "per-frame measurements of the frame the encoder saw" in text
+        assert "--allow-crop" in text  # the way out is named where it exists
+
+    def test_allow_crop_downgrades_the_hdr10plus_case_to_a_warning(self) -> None:
+        source = make_info(
+            "web.mkv", width=3840, height=1606, frames=1000, hdr10plus=True, dv=True, dv_profile=8
+        )
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1000, dv=True, dv_profile=7)
+        plan = build_plan(source, target, allow_crop=True)
+
+        assert plan.ok
+        assert plan.transfer == (Kind.HDR10PLUS,)
+        warned = " ".join(n.text for n in plan.warnings)
+        assert "--allow-crop was passed" in warned
+        # The warning has to say the checks cannot catch this, or a green
+        # verification report reads as confirmation that it was fine.
+        assert "every check will pass" in warned
+
+    def test_allow_crop_does_not_wave_through_a_moving_rpu(self) -> None:
+        """The flag accepts measurements taken elsewhere, not misplaced geometry.
+
+        A cropped source's level 5 offsets point at rows the target frame does
+        not have. There is no sense in which the user can knowingly accept that
+        — the result is simply wrong — so the flag deliberately stops short.
+        """
+        source = make_info("web.mkv", width=3840, height=1606, frames=1000, dv=True, dv_profile=8)
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1000)
+        plan = build_plan(source, target, allow_crop=True)
+
+        assert not plan.ok
+        text = _blocker_texts(plan)
+        assert "does not cover this" in text
+        assert "level 5" in text
+
+    def test_the_rpu_refusal_does_not_advertise_a_flag_that_would_not_help(self) -> None:
+        source = make_info("web.mkv", width=3840, height=1606, frames=1000, dv=True, dv_profile=8)
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1000)
+        assert "--allow-crop" not in _blocker_texts(build_plan(source, target))
 
     def test_frame_rate_mismatch_is_refused(self) -> None:
         source = make_info("web.mkv", dv=True, dv_profile=8, rate=Fraction(25), frames=1000)
