@@ -258,3 +258,64 @@ class TestOverrideCannotForceNothing:
             )
         )
         assert str(app.run_button["state"]) == "disabled"
+
+
+class TestVerificationInTheWindow:
+    """What the window shows when the checks do not all pass.
+
+    A failed verification is the one outcome where the user must not keep the
+    file, and the window is where they would read that. Covered here because
+    the existing tests reach a worker that throws, which is a different path:
+    a report that fails arrives through the queue as a result, not an error.
+    """
+
+    @staticmethod
+    def _report(*checks):
+        from hibrit.verify import Report
+
+        return Report(checks=tuple(checks))
+
+    def test_a_failure_is_named_and_the_verdict_is_unambiguous(self, app) -> None:
+        from hibrit.verify import Check
+
+        app._show_report(
+            self._report(
+                Check("dolby vision round-trip", True, "byte-for-byte"),
+                Check("picture untouched", False, "the coded picture data differs"),
+            )
+        )
+        log = app.log_text.get("1.0", "end")
+        assert "[PASS] dolby vision round-trip" in log
+        assert "[FAIL] picture untouched" in log
+        assert "Do not keep this output" in log
+        assert "All measured checks passed" not in log
+
+    def test_a_clean_report_says_so(self, app) -> None:
+        from hibrit.verify import Check
+
+        app._show_report(self._report(Check("frame count preserved", True, "1000 == 1000")))
+        log = app.log_text.get("1.0", "end")
+        assert "All measured checks passed" in log
+        assert "Do not keep" not in log
+
+    def test_an_unmeasured_check_is_neither_a_pass_nor_a_failure(self, app) -> None:
+        """A skipped check must not read as green. It is reported as SKIP and
+        does not stop the report from passing."""
+        from hibrit.verify import Check
+
+        app._show_report(
+            self._report(
+                Check("frame count preserved", True, "1000 == 1000"),
+                Check("picture untouched", True, "not run", skipped=True),
+            )
+        )
+        log = app.log_text.get("1.0", "end")
+        assert "[SKIP] picture untouched" in log
+        assert "All measured checks passed" in log
+
+    def test_the_failure_colour_is_the_one_used_for_blockers(self, app) -> None:
+        """The window has three tags and they have to mean what they look like."""
+        from hibrit.gui import NOTE_COLOURS
+        from hibrit.planner import Level
+
+        assert app.log_text.tag_cget("fail", "foreground") == NOTE_COLOURS[Level.BLOCKER]
