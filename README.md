@@ -32,14 +32,22 @@ exception.
 
 ## The trap this is built around
 
-`dovi_tool inject-rpu` does not stop when the metadata does not fit the video:
+Neither tool stops when the metadata does not fit the video. `dovi_tool
+inject-rpu`:
 
 ```
 Warning: mismatched lengths. video 173802, RPU 5735
 Metadata will be duplicated at the end to match video length
 ```
 
-It prints that, **exits 0**, and writes a finished file. The file plays. Players
+and `hdr10plus_tool inject`, in the same words with a different noun:
+
+```
+Warning: mismatched lengths. video 240, HDR10+ JSON 150
+Metadata will be duplicated at the end to match video length
+```
+
+Both print that, **exit 0**, and write a finished file. The file plays. Players
 show a Dolby Vision badge. Every frame after the mismatch carries metadata
 belonging to a different frame, for the entire runtime, and nothing downstream
 says so.
@@ -221,6 +229,16 @@ measured offset, remux, and verify.
 territory and a different problem), re-encode anything, or preserve profile 7's
 dual-layer structure as dual-layer.
 
+That last one is a real cost more often than it sounds. A profile 7 enhancement
+layer comes in two kinds: a minimal one (MEL) carries no picture correction and
+is lost for free, a full one (FEL) carries luma and chroma mapping that
+converting discards. Measured across the 106 profile 7 remuxes on the machine
+this was written for: **64 FEL to 42 MEL** — the losing case is the common one.
+
+Nothing in the container distinguishes them; MediaInfo reports both as
+`BL+EL+RPU`. The RPU says, so `hibrit plan` declines to guess and the run
+reports which it was as soon as it has read one.
+
 ## Tests
 
 ```
@@ -245,6 +263,20 @@ a deliberately shortened RPU, a lengthened one, two unrelated films, a search
 range too narrow to contain the answer. A test suite that only ever feeds a tool
 matching pairs never sees what it does with the mistake its user is most likely
 to make.
+
+### One rule the suite is arranged around
+
+**Anything that parses a tool's output is tested against that tool**, never
+against a sample written from memory. This is not fastidiousness. The guard that
+catches hdr10plus_tool's mismatch warning was written by analogy with
+dovi_tool's, matched nothing, and was dead code for weeks — its tests fed it a
+string I had invented, so they proved only that my invention parses. A flag that
+does not exist (`--skip-validation`) survived the same way, one caller from
+breaking a job.
+
+So the transcripts in `tests/test_metadata_tools.py` are copied from real runs,
+and a test in the `tools` tier re-parses what the tools say *now* and fails when
+that stops matching what the transcripts assume.
 
 ## Licence
 

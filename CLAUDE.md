@@ -82,6 +82,19 @@ use.
 that feeds a mismatched pair and asserts the tool declines. A suite that only
 ever sees matching inputs never observes the case the user will actually hit.
 
+**Never test a parser against a sample you wrote.** Anything that reads an
+external tool's output gets tested against that tool. The guard for
+hdr10plus_tool's mismatch warning was written by analogy with dovi_tool's,
+matched nothing, and was dead code for weeks — because its tests fed it a string
+invented from memory, which proved only that the invention parses. The same
+mistake produced a `--skip-validation` flag the tool does not have. Transcripts
+in the tests are copied from real runs, and one `tools` test re-parses what the
+tools say now so a stale transcript fails rather than passes.
+
+**"There are none of those here" is a claim about what you looked at.** This
+project said the library had no profile 7 FEL files, then that it had five, then
+measured 64. Each figure came from looking at more than the last.
+
 ## Style
 
 - Docstrings say *why*, not *what*. The commands are short; the reasons are not.
