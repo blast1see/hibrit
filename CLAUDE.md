@@ -62,7 +62,15 @@ Four tiers, and the split is deliberate:
 | `pytest -q -m "not tools and not real"` | nothing | the code does what it says |
 | `pytest -q -m tools` | the binaries | the wrappers drive them correctly |
 | `pytest -q -m real` | real clips (`HIBRIT_MEDIA`) | the result is right |
+| `pytest -q -m real` | a FEL remux (`HIBRIT_FEL`) | three more of the above run |
 | `pytest -q -m gui` | a display | the window is wired to the core |
+
+Set both variables before believing a green run. `HIBRIT_FEL` gates three tests
+that cannot be synthesised — `dovi_tool generate` makes profiles 5, 8.1 and 8.4,
+not 7 — and they skipped from the day they were written. Pointed at a real FEL
+film for the first time, one failed immediately: it was still asserting wording
+the planner had stopped producing a dozen commits earlier. **A skipped test
+reports success exactly as quietly as a passing one.**
 
 The window tests are out of the default run because a machine without a display
 would report them as failures rather than as something it could not attempt.

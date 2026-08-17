@@ -241,6 +241,20 @@ def build_plan(
                 )
             )
 
+    # Level 5 offsets really are plain pixel counts in the source frame's own
+    # geometry. Measured by reading them out of three UHD remuxes with known
+    # theatrical aspect ratios, all 3840x2160:
+    #
+    #     2001: A Space Odyssey   top/bottom 207  ->  3840x1746 = 2.199:1
+    #     A Clockwork Orange      left/right 127  ->  3586x2160 = 1.660:1
+    #     Blade Runner 2049       top/bottom 280  ->  3840x1600 = 2.400:1
+    #
+    # Each lands on that film's own ratio to three decimals, and the 1.66:1 one
+    # puts its offsets in the sides rather than the top, which is what a
+    # pillarboxed frame needs. Nothing here is normalised or relative. So an RPU
+    # authored against a 2160-row frame, injected into a 1080-row one, masks 280
+    # rows off a 1080-row picture: a quarter of the height per side instead of
+    # an eighth. Hence a blocker rather than a warning.
     if source.resolution and target.resolution and source.resolution != target.resolution:
         notes.append(
             Note(
