@@ -255,13 +255,31 @@ def build_plan(
     # authored against a 2160-row frame, injected into a 1080-row one, masks 280
     # rows off a 1080-row picture: a quarter of the height per side instead of
     # an eighth. Hence a blocker rather than a warning.
+    #
+    # But that argument is about the RPU, and it was being given even when no
+    # RPU was being transferred — a cropped 3840x1606 WEB-DL donating only
+    # HDR10+ to a letterboxed 3840x2160 remux was refused with a sentence about
+    # level 5 offsets, which were not involved. The mismatch matters for HDR10+
+    # too, for a different reason worth stating accurately: its per-frame values
+    # are measurements of the frame the encoder saw. Crop a quarter of the rows
+    # off that frame, or add them back as black, and the same numbers now
+    # describe a different set of pixels.
     if source.resolution and target.resolution and source.resolution != target.resolution:
+        if Kind.DV in transfer:
+            why = (
+                "RPU level 5 active-area offsets are counted in pixels of the source "
+                "frame, so the letterbox bars would be placed in the wrong rows"
+            )
+        else:
+            why = (
+                "HDR10+ records per-frame measurements of the frame the encoder saw, "
+                "so with a different number of rows in it the same numbers describe a "
+                "different set of pixels"
+            )
         notes.append(
             Note(
                 Level.BLOCKER,
-                f"resolution differs ({source.resolution} vs {target.resolution}). RPU "
-                "level 5 active-area offsets are counted in pixels of the source frame, "
-                "so the letterbox bars would be placed in the wrong rows.",
+                f"resolution differs ({source.resolution} vs {target.resolution}). {why}.",
             )
         )
 

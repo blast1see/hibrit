@@ -86,6 +86,28 @@ class TestRefusals:
         assert not plan.ok
         assert "level 5" in _blocker_texts(plan)
 
+    def test_the_refusal_gives_the_reason_that_applies_to_this_transfer(self) -> None:
+        """A cropped WEB-DL donating only HDR10+ used to be refused with a
+        sentence about RPU level 5 offsets, which were not being transferred.
+
+        This is the shape of a real pair: an iTunes WEB-DL is cropped to its
+        2.40:1 picture, the Blu-ray remux keeps the bars in the frame, and the
+        remux already has its own Dolby Vision — so HDR10+ is the only thing
+        moving. The mismatch still matters, but for a different reason, and
+        saying the wrong one teaches the reader something untrue.
+        """
+        source = make_info(
+            "web.mkv", width=3840, height=1606, frames=1000, hdr10plus=True, dv=True, dv_profile=8
+        )
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1000, dv=True, dv_profile=7)
+        plan = build_plan(source, target)
+
+        assert [k.label for k in plan.transfer] == ["HDR10+"]
+        text = _blocker_texts(plan)
+        assert not plan.ok
+        assert "level 5" not in text
+        assert "per-frame measurements of the frame the encoder saw" in text
+
     def test_frame_rate_mismatch_is_refused(self) -> None:
         source = make_info("web.mkv", dv=True, dv_profile=8, rate=Fraction(25), frames=1000)
         target = make_info("bluray.mkv", rate=Fraction(24000, 1001), frames=1000)
