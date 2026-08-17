@@ -116,8 +116,14 @@ in a player:
 
 The last one is the real proof. It hashes only the VCL NAL units — the ones that
 carry picture — and ignores every metadata layer and every piece of scaffolding
-around them, so it costs one read of each stream rather than a rewrite, and runs
-by default.
+around them.
+
+It is not free, and the earlier version of this paragraph said it was. The
+result is a Matroska file and the hash needs Annex B, so the finished file's
+video track is extracted before it can be read: another full copy, about 68 GB
+for a 70 GB output. That is budgeted for rather than avoided — verifying
+something other than the finished file would not be verification — and the
+working-space figure below covers it.
 
 Hashing the whole file instead does not work, and the way it fails is
 instructive: `dovi_tool inject-rpu` adds a seven-byte access unit delimiter to
