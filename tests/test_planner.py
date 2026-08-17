@@ -100,8 +100,8 @@ class TestRefusals:
 
     def test_wildly_different_runtimes_are_refused(self) -> None:
         """108k frames apart is not a trimmed logo; it is a different film."""
-        source = make_info("barbarian.mkv", dv=True, dv_profile=8, frames=147_624)
-        target = make_info("casino.mkv", frames=256_391)
+        source = make_info("a.mkv", dv=True, dv_profile=8, frames=147_624)
+        target = make_info("b.mkv", frames=256_391)
         plan = build_plan(source, target)
         assert not plan.ok
         assert "different cut" in _blocker_texts(plan)
@@ -180,7 +180,7 @@ class TestProfileHandling:
         assert "MEL" in text and "FEL" in text
 
     def test_the_profile_7_note_is_a_warning_because_the_loss_is_likely(self) -> None:
-        """Measured across this library: 64 FEL against 42 MEL."""
+        """Measured across a sample of real remuxes: 64 FEL against 42 MEL."""
         source = make_info("uhd.mkv", dv=True, dv_profile=7, dv_layers="BL+EL+RPU", frames=1000)
         plan = build_plan(source, make_info("bluray.mkv", frames=1000))
         levels = {n.level for n in plan.notes if "profile 7" in n.text}

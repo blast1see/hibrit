@@ -181,11 +181,11 @@ def snap_to_standard_rate(rate: Fraction) -> Fraction:
 def _parse_frame_rate(track: dict[str, Any]) -> Fraction | None:
     """The video's frame rate, snapped to a standard one either way it arrives.
 
-    An exact-looking pair is not the same as an exact rate. ``Alien.1979
-    .Directors.Cut`` in this library reports ``FrameRate_Num 23976 /
-    FrameRate_Den 1000`` — a rational, and a rounding: 23.976000 where the real
-    rate is 24000/1001 = 23.976024. Trusting the pair because it is a pair was
-    the mistake; it gets the same treatment the decimal does.
+    An exact-looking pair is not the same as an exact rate. One real remux in a
+    302-file survey reports ``FrameRate_Num 23976 / FrameRate_Den 1000`` — a
+    rational, and a rounding: 23.976000 where the real rate is 24000/1001 =
+    23.976024. Trusting the pair because it is a pair was the mistake; it gets
+    the same treatment the decimal does.
     """
     num = track.get("FrameRate_Num")
     den = track.get("FrameRate_Den")

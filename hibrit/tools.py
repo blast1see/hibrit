@@ -113,10 +113,9 @@ def decode_output(raw: bytes, *, fallback: str | None = None) -> str:
     ``b"\\xddlerleme: 0%"`` — 0xDD is not valid UTF-8, so ``errors="replace"``
     turned it into a replacement character and the log went to mojibake.
 
-    Paths matter more than progress lines. This library has files like
-    ``Dag (2012)...mkv`` with Turkish letters in the name, and a tool echoing
-    one back should not come out mangled in a log somebody is reading to work
-    out what went wrong.
+    Paths matter more than progress lines. Filenames carry non-ASCII letters all
+    the time, and a tool echoing one back should not come out mangled in a log
+    somebody is reading to work out what went wrong.
 
     UTF-8 first, because it is right for most of these tools and never guesses
     wrong — invalid UTF-8 is detectable. Then the console encoding. Then
