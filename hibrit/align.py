@@ -44,6 +44,20 @@ metronomic 9 frames. Real films have irregular shot rhythm and that irregularity
 is the fingerprint; material that does not (a slideshow, a rigidly cut montage)
 will be refused rather than mismeasured, which is the right failure but is still
 a failure.
+
+One thing that sounds like it should break this and does not: a **cropped**
+source against a **letterboxed** target. A streaming release scaled to 128x72
+is all picture; a disc remux of the same film is picture plus black bar, and
+both get squashed into the same little grey rectangle. Measured on a real pair
+-- a 3840x1606 WEB-DL against a 3840x2160 remux, 209k frames -- the answer was
++0 frames at confidence 6.06 and 6.36 in two windows, higher than anything the
+synthetic clips produce.
+
+The reason is worth keeping, because it is the argument against "fixing" this
+with crop detection: adding a constant black border multiplies every frame's
+mean by the same factor and adds the same offset, so the frame-to-frame
+*difference* is scaled by a constant, and a normalised correlation does not
+care about a constant. The cuts stay exactly where they were.
 """
 
 from __future__ import annotations

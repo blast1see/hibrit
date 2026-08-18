@@ -67,6 +67,32 @@ class TestCorrelate:
         assert found == 91
         assert confidence > CONFIDENCE_RELIABLE
 
+    def test_a_letterboxed_target_against_a_cropped_source(self) -> None:
+        """The shape a real pair actually has, reduced to its arithmetic.
+
+        A streaming release is cropped to its 2.40:1 picture; the disc keeps
+        the black bars inside a 16:9 frame. Both get scaled to the same 128x72
+        grey rectangle, so one carries roughly a quarter of its rows as bar and
+        the other carries none.
+
+        Adding a constant black border multiplies every frame's mean by the
+        same factor and adds the same offset. The frame-to-frame difference is
+        therefore scaled by a constant, and a normalised correlation does not
+        care about a constant. Measured on the real 3840x1606 against 3840x2160
+        pair at 209k frames: +0 frames, confidence 6.06 and 6.36. This is the
+        cheap version of that, and it exists so nobody "fixes" the aligner by
+        bolting crop detection onto it.
+        """
+        base = shot_curve(4000, seed=3)
+        cropped = base[200:]
+        # 1606 of 2160 rows are picture; the rest is bar at a low PQ black.
+        share = 1606 / 2160
+        letterboxed = base[200 + 45 :] * share + 4.0 * (1 - share)
+
+        found, confidence, _ = correlate(cropped, letterboxed, max_shift=300)
+        assert found == 45
+        assert confidence > CONFIDENCE_RELIABLE
+
     def test_unrelated_content_scores_near_one(self) -> None:
         a = shot_curve(4000, seed=11)
         b = shot_curve(4000, seed=12)
