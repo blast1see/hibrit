@@ -113,6 +113,125 @@ class TestExitCodes:
         assert __version__ in capsys.readouterr().out
 
 
+class TestTheCommandsNobodyTested:
+    """``probe`` and ``verify`` are whole subcommands that never ran in a test.
+
+    Both are things a person types directly — ``hibrit probe`` is the first
+    command anyone runs, and ``hibrit verify`` is how you re-check a file after
+    the fact. Coverage showed both entry points untouched, which means an
+    argument renamed underneath them would have been found by a user rather
+    than by the suite.
+    """
+
+    def test_probe_prints_a_line_per_file_and_exits_zero(
+        self, capsys, monkeypatch, tmp_path
+    ) -> None:
+        monkeypatch.setattr(
+            cli, "probe", lambda path, box: make_info(Path(path).name, dv=True, dv_profile=8)
+        )
+        args = cli.build_parser().parse_args(["probe", "one.mkv", "two.mkv"])
+        assert cli.cmd_probe(args) == 0
+
+        out = capsys.readouterr().out
+        assert "one.mkv" in out and "two.mkv" in out
+        assert "frames:" not in out, "frame counts are the --verbose extra"
+
+    def test_probe_verbose_adds_the_counts(self, capsys, monkeypatch) -> None:
+        monkeypatch.setattr(
+            cli,
+            "probe",
+            lambda path, box: make_info(
+                Path(path).name,
+                frames=209_389,
+                dv=True,
+                dv_profile=7,
+                compatibility=("Blu-ray", "HDR10"),
+            ),
+        )
+        args = cli.build_parser().parse_args(["probe", "-v", "one.mkv"])
+        assert cli.cmd_probe(args) == 0
+
+        out = capsys.readouterr().out
+        assert "209389" in out
+        # A profile 7 that is Blu-ray compatible is the single most useful
+        # thing this command prints, and it only appears under --verbose.
+        assert "Blu-ray" in out and "HDR10" in out
+
+    def test_verify_passes_every_path_through_and_exits_on_the_report(
+        self, capsys, monkeypatch, tmp_path
+    ) -> None:
+        """The paths have to arrive where verify() expects them, under the
+        right keyword. Nothing else in the suite checks that wiring."""
+        for name in ("out.mkv", "target.mkv", "rpu.bin", "h10p.json", "clean.hevc"):
+            (tmp_path / name).write_bytes(b"x")
+
+        seen: dict = {}
+
+        class FakeReport:
+            passed = True
+
+            def describe(self) -> str:
+                return "all good"
+
+        def fake_verify(result, **kwargs):
+            seen["result"] = result
+            seen.update(kwargs)
+            return FakeReport()
+
+        import hibrit.verify as verify_module
+
+        monkeypatch.setattr(verify_module, "verify", fake_verify)
+        args = cli.build_parser().parse_args(
+            [
+                "verify",
+                str(tmp_path / "out.mkv"),
+                "--target",
+                str(tmp_path / "target.mkv"),
+                "--rpu",
+                str(tmp_path / "rpu.bin"),
+                "--hdr10plus",
+                str(tmp_path / "h10p.json"),
+                "--clean-stream",
+                str(tmp_path / "clean.hevc"),
+                "--workdir",
+                str(tmp_path),
+            ]
+        )
+        assert cli.cmd_verify(args) == 0
+        assert "all good" in capsys.readouterr().out
+
+        assert seen["result"].name == "out.mkv"
+        assert seen["target"].name == "target.mkv"
+        assert seen["rpu"].name == "rpu.bin"
+        assert seen["hdr10plus"].name == "h10p.json"
+        assert seen["clean_target_stream"].name == "clean.hevc"
+
+    def test_a_failed_verification_is_a_non_zero_exit(self, monkeypatch, tmp_path) -> None:
+        (tmp_path / "out.mkv").write_bytes(b"x")
+        (tmp_path / "target.mkv").write_bytes(b"x")
+
+        class FailedReport:
+            passed = False
+
+            def describe(self) -> str:
+                return "1 check(s) failed. Do not keep this output."
+
+        import hibrit.verify as verify_module
+
+        monkeypatch.setattr(verify_module, "verify", lambda result, **kw: FailedReport())
+        args = cli.build_parser().parse_args(
+            [
+                "verify",
+                str(tmp_path / "out.mkv"),
+                "--target",
+                str(tmp_path / "target.mkv"),
+                "--workdir",
+                str(tmp_path),
+            ]
+        )
+        assert cli.cmd_verify(args) != 0
+
+
 class TestRunDecisions:
     """The decisions `hibrit run` makes before and after the pipeline.
 
