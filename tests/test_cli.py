@@ -315,6 +315,41 @@ class TestRunDecisions:
         assert cli.cmd_run(args) == 0
         assert seen["approve"] is None, "--yes must not supply an always-yes approver"
 
+    def test_no_picture_check_frees_the_biggest_file_during_the_run(
+        self, workable, tmp_path, monkeypatch
+    ):
+        """The pipeline has a switch for this and nothing ever flipped it.
+
+        --no-picture-check gives up the one check that needs the extracted
+        target stream, and the stream is the largest thing on the disk. It was
+        still being carried all the way through the remux and deleted at the
+        end, so the peak was paid for a check that had been declined.
+        """
+        from hibrit import pipeline
+
+        seen = {}
+
+        def fake_run(_plan, output, **kwargs):
+            seen.update(kwargs)
+            Path(output).write_bytes(b"out")
+            return pipeline.Result(output=Path(output), plan=_plan)
+
+        monkeypatch.setattr(pipeline, "run", fake_run)
+        source, target = workable
+
+        args = self._args(source, target, tmp_path, **{"--yes": True, "--no-verify": True})
+        assert cli.cmd_run(args) == 0
+        assert seen["keep_clean_stream"] is True, "the default must keep it for the check"
+
+        args = self._args(
+            source,
+            target,
+            tmp_path,
+            **{"--yes": True, "--no-verify": True, "--no-picture-check": True},
+        )
+        assert cli.cmd_run(args) == 0
+        assert seen["keep_clean_stream"] is False
+
     def test_a_failed_verification_is_a_non_zero_exit(self, workable, tmp_path, monkeypatch):
         """A script chaining commands has only the exit code to go on."""
         from hibrit import pipeline
