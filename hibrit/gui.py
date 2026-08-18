@@ -262,6 +262,10 @@ class App(ttk.Frame):
         source, target = self.source_path.get(), self.target_path.get()
         if not source or not target:
             return
+        # A new pair inherits nothing. Leaving this ticked from the last pair
+        # would silently accept a crop nobody looked at, and it has to happen
+        # before the plan is built rather than after.
+        self.allow_crop.set(False)
         try:
             self.source_info = probe(Path(source), self.box)
             self.target_info = probe(Path(target), self.box)
