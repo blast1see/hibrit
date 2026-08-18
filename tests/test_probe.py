@@ -168,6 +168,28 @@ class TestBasics:
         assert rate is not None
         assert float(rate) == pytest.approx(23.976, abs=1e-3)
 
+    def test_an_unusable_fraction_falls_through_to_the_decimal(self) -> None:
+        """A broken pair is not a reason to give up; there is another source.
+
+        The two failure branches in _parse_frame_rate do deliberately different
+        things — the fraction passes on to the decimal, the decimal gives up —
+        and nothing exercised either of them. A zero denominator is the shape
+        that actually turns up, from a container that wrote the field without
+        filling it in.
+        """
+        video = dict(DUNE["media"]["track"][1])
+        video["FrameRate_Num"] = "24000"
+        video["FrameRate_Den"] = "0"
+        rate = parse_mediainfo(payload_exactly(video), HERE).frame_rate
+        assert rate == Fraction(24000, 1001), "should have fallen back to FrameRate"
+
+    def test_an_unusable_decimal_gives_up_rather_than_guessing(self) -> None:
+        video = dict(DUNE["media"]["track"][1])
+        video.pop("FrameRate_Num")
+        video.pop("FrameRate_Den")
+        video["FrameRate"] = "variable"
+        assert parse_mediainfo(payload_exactly(video), HERE).frame_rate is None
+
     def test_missing_frame_rate_is_none_not_a_guess(self) -> None:
         video = dict(CASINO["media"]["track"][1])
         for key in ("FrameRate_Num", "FrameRate_Den", "FrameRate"):
