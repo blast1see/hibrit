@@ -278,6 +278,19 @@ def _compare_hdr10plus(
     extracted = workdir / "verify_hdr10plus.json"
     tool.extract(result, extracted)
 
+    # The byte comparison is the path that actually fires. Measured on a
+    # 209,389-frame remux, retiming included: the JSON read back out was
+    # byte-for-byte the JSON that went in, all 209,430,721 of them.
+    #
+    # The fallback below is not dead code, but it is insurance rather than the
+    # normal case, and it is worth knowing which is which. hdr10plus_tool
+    # re-derives SceneId and SceneFrameIndex from the payload when it reads a
+    # stream: hand-author a JSON that says all 240 frames are scene 0, inject
+    # it, read it back, and the tool reports 240 scenes. Anything that came out
+    # of the tool in the first place -- including anything its own editor
+    # retimed -- already carries the numbering it will derive again, so it
+    # round-trips exactly. Only a JSON written by something else needs the
+    # comparison further down.
     if sha256_file(extracted) == sha256_file(expected):
         return [
             Check(
