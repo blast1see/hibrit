@@ -932,6 +932,54 @@ class TestPipelineEndToEnd:
         assert report.passed, report.describe()
         assert not report.unmeasured, "the pixel check should have run"
 
+    def test_a_track_name_that_no_longer_describes_the_file_is_reported(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The warning existed, was unit-tested, and had never once fired.
+
+        Release groups write the metadata into the video track's name. hibrit
+        keeps that name -- editing someone's label is not its business -- so
+        after a transfer the label can be quietly wrong. matroska.py has tests
+        for the wording; nothing checked that the pipeline actually asks, and
+        coverage showed the ``say(f"note: {stale}")`` line never executed.
+
+        The name here claims HDR10 and nothing else, and the file is about to
+        gain Dolby Vision it does not mention. A name that claims nothing at
+        all -- "Blu-ray Remux" -- is deliberately left alone instead.
+        """
+        from hibrit.pipeline import run
+        from hibrit.planner import build_plan
+
+        dovi = DoviTool(toolbox)
+        source_stream = dovi.inject_rpu(hdr10_clip, synthetic_rpu, tmp_path / "source.hevc")
+
+        source_mkv = tmp_path / "source.mkv"
+        target_mkv = tmp_path / "target.mkv"
+        toolbox.run("mkvmerge", ["-q", "-o", str(source_mkv), str(source_stream)], check=False)
+        toolbox.run(
+            "mkvmerge",
+            [
+                "-q",
+                "-o",
+                str(target_mkv),
+                "--track-name",
+                "0:UHD BluRay Remux / HDR10",
+                str(hdr10_clip),
+            ],
+            check=False,
+        )
+
+        plan = build_plan(probe(source_mkv, toolbox), probe(target_mkv, toolbox))
+        result = run(plan, tmp_path / "out.mkv", workdir=tmp_path / "work", toolbox=toolbox)
+
+        # The name came across untouched...
+        produced = probe(result.output, toolbox)
+        assert produced.track.get("Title") == "UHD BluRay Remux / HDR10"
+
+        # ...and the run said so rather than leaving it to be discovered.
+        notes = [line for line in result.log if line.startswith("note:")]
+        assert notes, f"the stale label was never mentioned: {result.log}"
+
     def test_a_job_that_does_not_fit_the_disk_never_starts(
         self, hdr10_clip, toolbox, tmp_path: Path, monkeypatch
     ) -> None:

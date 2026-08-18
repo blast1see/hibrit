@@ -403,7 +403,9 @@ def _execute(
     # The target's own labelling came across with it, and it may describe
     # metadata this job just changed.
     produced = probe(output, box)
-    stale = stale_label_warning(produced.track.get("Title"), produced)
+    stale = stale_label_warning(
+        produced.track.get("Title"), produced, added=[kind.label for kind in plan.transfer]
+    )
     if stale:
         say(f"note: {stale}")
     if not keep_intermediates:

@@ -17,7 +17,8 @@ the tools parse.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from hibrit.probe import VideoInfo, probe
@@ -124,7 +125,23 @@ def video_track_properties(source: Path, toolbox: Toolbox | None = None) -> list
     return args
 
 
-def stale_label_warning(name: str | None, result: VideoInfo) -> str | None:
+#: Words that make a track name a *claim about HDR metadata* rather than a
+#: description of the file. A name containing none of them is not talking about
+#: anything this program changes, so nothing this program does can make it wrong.
+#: Without this gate "Blu-ray Remux" got nagged the moment the file gained
+#: HDR10+, which is the opposite of what the docstring below promises.
+_METADATA_TERMS = ("hdr10", "hdr", "dolby vision", "dovi", "dvhe", "profile", "mel", "fel", "sdr")
+
+#: How a name says it has Dolby Vision. Bare "dv" needs a boundary or it matches
+#: DVD, DVR and half the release tags in circulation.
+_DV_TERMS = re.compile(r"dolby\s*vision|dovi|dvhe|(?<![a-z])dv(?![a-z])", re.IGNORECASE)
+
+
+def stale_label_warning(
+    name: str | None,
+    result: VideoInfo,
+    added: Iterable[str] = (),
+) -> str | None:
     """Say so when a preserved track name no longer describes the track.
 
     Release groups write the metadata into the video track's name. A real remux carries::
@@ -139,13 +156,31 @@ def stale_label_warning(name: str | None, result: VideoInfo) -> str | None:
 
     So it is preserved and reported. The file is correct either way — this is
     not a failure, it is something to go and fix in the name if you care.
+
+    Two things this gets right only because they were measured rather than
+    assumed:
+
+    * **A name that makes no claim cannot become wrong.** Most track names are
+      "Blu-ray Remux" or "MPEG-H HEVC Video" and say nothing about HDR at all.
+      Those are left alone; see :data:`_METADATA_TERMS`.
+    * **Only what changed is worth reporting.** *added* is the metadata this run
+      put in. Complaining that a name does not mention HDR10+ the target already
+      had is complaining about someone else's label, not about anything that
+      happened here. Passing nothing keeps the old behaviour of reporting on
+      whatever is in the file.
     """
     if not name:
         return None
 
     lowered = name.lower()
+    describes_metadata = any(term in lowered for term in _METADATA_TERMS)
+    kinds = {str(kind).lower() for kind in added}
+    changed = (lambda what: True) if not kinds else (lambda what: what in kinds)
+
     problems: list[str] = []
 
+    # Losses: the name claims something the file no longer has. Always worth
+    # saying, whatever this run was asked to move.
     if ("mel" in lowered or "fel" in lowered) and result.dv_profile == 8:
         problems.append("it mentions an enhancement layer, and this is now single-layer 8.1")
     for profile in (5, 7):
@@ -155,8 +190,14 @@ def stale_label_warning(name: str | None, result: VideoInfo) -> str | None:
             )
     if "hdr10+" in lowered and not result.has_hdr10plus:
         problems.append("it mentions HDR10+, which this no longer carries")
-    if "hdr10+" not in lowered and result.has_hdr10plus:
-        problems.append("this now carries HDR10+, which the name does not mention")
+
+    # Gains: the name is now incomplete. Only for a name that was describing
+    # metadata in the first place, and only for what this run actually added.
+    if describes_metadata:
+        if "hdr10+" not in lowered and result.has_hdr10plus and changed("hdr10+"):
+            problems.append("this now carries HDR10+, which the name does not mention")
+        if not _DV_TERMS.search(name) and result.has_dv and changed("dolby vision"):
+            problems.append("this now carries Dolby Vision, which the name does not mention")
 
     if not problems:
         return None

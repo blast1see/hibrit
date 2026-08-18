@@ -448,6 +448,64 @@ class TestStaleLabels:
 
         assert stale_label_warning("Blu-ray Remux", self._result(dv=True, dv_profile=8)) is None
 
+    def test_a_plain_name_is_still_left_alone_once_the_file_gains_something(self) -> None:
+        """The rule above only held because the fixture had no HDR10+.
+
+        Give the same plain name a file that now carries HDR10+ and the old
+        implementation nagged about it, contradicting its own docstring. A name
+        that never claimed anything cannot have become wrong.
+        """
+        from hibrit.matroska import stale_label_warning
+
+        gained = self._result(dv=True, dv_profile=8, hdr10plus=True)
+        for name in ("Blu-ray Remux", "MPEG-H HEVC Video", "Disclosure Day"):
+            assert stale_label_warning(name, gained) is None, name
+
+    def test_dolby_vision_added_to_a_name_that_does_not_mention_it(self) -> None:
+        """The symmetric case, and the guide's headline scenario.
+
+        Moving DV onto an HDR10-only remux is the whole first half of this
+        program, and the warning had a rule for gaining HDR10+ and none for
+        gaining Dolby Vision.
+        """
+        from hibrit.matroska import stale_label_warning
+
+        warning = stale_label_warning(
+            "UHD BluRay Remux / HDR10", self._result(dv=True, dv_profile=8)
+        )
+        assert warning is not None
+        assert "Dolby Vision" in warning and "does not mention" in warning
+
+    def test_a_name_that_already_says_dv_is_not_told_it_has_dv(self) -> None:
+        from hibrit.matroska import stale_label_warning
+
+        got = self._result(dv=True, dv_profile=8)
+        for name in ("HDR10 / Dolby Vision", "HDR10 / DoVi", "HDR10 / dvhe.08", "HDR10 / DV"):
+            assert stale_label_warning(name, got) is None, name
+
+    def test_dvd_in_a_name_is_not_dolby_vision(self) -> None:
+        """Bare "dv" needs a boundary or it matches half the tags in circulation."""
+        from hibrit.matroska import stale_label_warning
+
+        warning = stale_label_warning("HDR10 / DVD source", self._result(dv=True, dv_profile=8))
+        assert warning is not None, "DVD should not have counted as a Dolby Vision mention"
+
+    def test_only_what_this_run_added_is_reported(self) -> None:
+        """A gap the target already had is someone else's label, not this job's.
+
+        Without *added* the warning describes whatever is in the finished file,
+        so a target that arrived with unmentioned HDR10+ gets reported for it
+        even when this run only moved Dolby Vision.
+        """
+        from hibrit.matroska import stale_label_warning
+
+        got = self._result(dv=True, dv_profile=7, hdr10plus=True)
+        # This run moved DV only; the HDR10+ was already there and already
+        # unmentioned, so there is nothing here to report.
+        assert stale_label_warning("Dolby Vision P7", got, added=["Dolby Vision"]) is None
+        # Told nothing about what changed, it falls back to describing the file.
+        assert stale_label_warning("Dolby Vision P7", got) is not None
+
 
 class TestContainerFailures:
     """The paths that fire when a tool goes wrong on a 70 GB file.
