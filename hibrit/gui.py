@@ -162,7 +162,7 @@ class App(ttk.Frame):
             align_frame,
             text="Source is cropped to its picture — accept it (HDR10+ only)",
             variable=self.allow_crop,
-            command=self._reprobe,
+            command=self._replan,
             state="disabled",
         )
         self.crop_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
@@ -286,6 +286,19 @@ class App(ttk.Frame):
         )
         self.align_button["state"] = "normal" if self.plan.needs_alignment else "disabled"
         self.override_check["state"] = "disabled"
+        self._refresh_run_button()
+
+    def _replan(self) -> None:
+        """Rebuild the plan without disturbing a measured alignment.
+
+        The crop checkbox changes only whether a blocker is accepted, and
+        rerunning the full reprobe would throw away an offset that took four
+        and a half minutes to measure. Ticking a box must not cost that.
+        """
+        if self.source_info is None or self.target_info is None:
+            return
+        self.plan = build_plan(self.source_info, self.target_info, allow_crop=self.allow_crop.get())
+        self._render_plan(self.plan)
         self._refresh_run_button()
 
     def _render_plan(self, plan: Plan) -> None:
