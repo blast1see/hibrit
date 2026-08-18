@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 from hibrit import __version__
 from hibrit.align import Alignment, align
 from hibrit.pipeline import SPACE_FACTOR, NotEnoughSpace, free_space, run
-from hibrit.planner import Level, Plan, build_plan
+from hibrit.planner import Kind, Level, Plan, build_plan
 from hibrit.probe import VideoInfo, probe
 from hibrit.tools import Toolbox
 from hibrit.verify import verify
@@ -60,6 +60,7 @@ class App(ttk.Frame):
         self.space_label = tk.StringVar(value="")
         self.alignment_text = tk.StringVar(value="not measured")
         self.override = tk.BooleanVar(value=False)
+        self.allow_crop = tk.BooleanVar(value=False)
         # On by default: the check reads the two streams once and compares only
         # their coded picture units, so it costs a read rather than a rewrite.
         self.verify_pixels = tk.BooleanVar(value=True)
@@ -152,6 +153,19 @@ class App(ttk.Frame):
             state="disabled",
         )
         self.override_check.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        # The other thing a plan can be blocked on that a person can knowingly
+        # accept. Without it the window shows a blocker telling the user to
+        # pass a command-line flag, then disables Run: a dead end reached by
+        # the most ordinary real pair there is, a cropped WEB-DL and a
+        # letterboxed remux.
+        self.crop_check = ttk.Checkbutton(
+            align_frame,
+            text="Source is cropped to its picture — accept it (HDR10+ only)",
+            variable=self.allow_crop,
+            command=self._reprobe,
+            state="disabled",
+        )
+        self.crop_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
         row += 1
 
         # --- actions ------------------------------------------------------------
@@ -251,7 +265,9 @@ class App(ttk.Frame):
         try:
             self.source_info = probe(Path(source), self.box)
             self.target_info = probe(Path(target), self.box)
-            self.plan = build_plan(self.source_info, self.target_info)
+            self.plan = build_plan(
+                self.source_info, self.target_info, allow_crop=self.allow_crop.get()
+            )
         except Exception as error:
             messagebox.showerror("Could not read the files", str(error))
             return
@@ -260,6 +276,11 @@ class App(ttk.Frame):
         self._show_space()
         self.alignment = None
         self.override.set(False)
+        # Offered only when it would change the answer: the resolutions differ
+        # and the RPU is staying put. It never applies to a moving RPU.
+        resolutions_differ = self.source_info.resolution != self.target_info.resolution
+        moving_rpu = any(kind is Kind.DV for kind in self.plan.transfer)
+        self.crop_check["state"] = "normal" if resolutions_differ and not moving_rpu else "disabled"
         self.alignment_text.set(
             "not measured" if self.plan.needs_alignment else "not needed — frame counts match"
         )

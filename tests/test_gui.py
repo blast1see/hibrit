@@ -198,6 +198,89 @@ class _SilentMessagebox:
         return None
 
 
+class TestTheCroppedSourceIsNotADeadEnd:
+    """The window offered a way out that only existed on the command line.
+
+    A cropped WEB-DL donating HDR10+ to a letterboxed remux is the most
+    ordinary real pair there is, and the plan blocks it. The blocker said
+    "Pass --allow-crop to accept this", the window printed that sentence, and
+    then disabled Run. Nothing in the window could set the flag.
+    """
+
+    @staticmethod
+    def _pair(monkeypatch, *, source_h: int, target_h: int, moving_rpu: bool = False):
+        from conftest import make_info
+
+        from hibrit import gui as gui_module
+
+        source = make_info(
+            "web.mkv",
+            width=3840,
+            height=source_h,
+            frames=1000,
+            hdr10plus=True,
+            dv=True,
+            dv_profile=8,
+        )
+        target = make_info(
+            "remux.mkv",
+            width=3840,
+            height=target_h,
+            frames=1000,
+            dv=not moving_rpu,
+            dv_profile=None if moving_rpu else 7,
+        )
+        monkeypatch.setattr(
+            gui_module, "probe", lambda path, box: source if "web" in str(path) else target
+        )
+
+    def test_the_checkbox_appears_and_unblocks_the_plan(
+        self, app, monkeypatch, tmp_path: Path
+    ) -> None:
+        self._pair(monkeypatch, source_h=1606, target_h=2160)
+        app.source_path.set("web.mkv")
+        app.target_path.set("remux.mkv")
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+
+        assert not app.plan.ok, "the pair must still be refused by default"
+        assert str(app.crop_check["state"]) == "normal", "no way to accept it"
+
+        app.allow_crop.set(True)
+        app._reprobe()
+
+        assert app.plan.ok
+        assert str(app.run_button["state"]) == "normal"
+
+    def test_it_is_not_offered_when_the_rpu_is_the_thing_moving(
+        self, app, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Ticking it there would be offering to accept a wrong file."""
+        self._pair(monkeypatch, source_h=1606, target_h=2160, moving_rpu=True)
+        app.source_path.set("web.mkv")
+        app.target_path.set("remux.mkv")
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+
+        assert not app.plan.ok
+        assert str(app.crop_check["state"]) == "disabled"
+
+    def test_it_is_not_offered_when_the_shapes_already_match(
+        self, app, monkeypatch, tmp_path: Path
+    ) -> None:
+        self._pair(monkeypatch, source_h=2160, target_h=2160)
+        app.source_path.set("web.mkv")
+        app.target_path.set("remux.mkv")
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+
+        assert app.plan.ok
+        assert str(app.crop_check["state"]) == "disabled"
+
+
 class TestOverrideCannotForceNothing:
     """The override box forces a figure through. A refusal without a figure has
     none, so there is nothing for it to force — and the pipeline would reject it
