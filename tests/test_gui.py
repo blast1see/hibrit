@@ -208,7 +208,14 @@ class TestTheCroppedSourceIsNotADeadEnd:
     """
 
     @staticmethod
-    def _pair(monkeypatch, *, source_h: int, target_h: int, moving_rpu: bool = False):
+    def _pair(
+        monkeypatch,
+        *,
+        source_h: int,
+        target_h: int,
+        moving_rpu: bool = False,
+        frames: tuple[int, int] = (1000, 1000),
+    ):
         from conftest import make_info
 
         from hibrit import gui as gui_module
@@ -217,7 +224,7 @@ class TestTheCroppedSourceIsNotADeadEnd:
             "web.mkv",
             width=3840,
             height=source_h,
-            frames=1000,
+            frames=frames[0],
             hdr10plus=True,
             dv=True,
             dv_profile=8,
@@ -226,7 +233,7 @@ class TestTheCroppedSourceIsNotADeadEnd:
             "remux.mkv",
             width=3840,
             height=target_h,
-            frames=1000,
+            frames=frames[1],
             dv=not moving_rpu,
             dv_profile=None if moving_rpu else 7,
         )
@@ -250,6 +257,37 @@ class TestTheCroppedSourceIsNotADeadEnd:
         app.allow_crop.set(True)
         app._reprobe()
 
+        assert app.plan.ok
+        assert str(app.run_button["state"]) == "normal"
+
+    def test_ticking_it_does_not_throw_away_a_measured_offset(
+        self, app, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Measuring costs four and a half minutes; a checkbox must not spend it.
+
+        The obvious wiring is to call the full reprobe, which resets the
+        alignment along with everything else. Someone who measures first and
+        then reads the blocker would pay for the measurement twice.
+        """
+        from hibrit.align import Alignment, Verdict
+
+        self._pair(monkeypatch, source_h=1606, target_h=2160, frames=(1000, 1008))
+        app.source_path.set("web.mkv")
+        app.target_path.set("remux.mkv")
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+        assert app.plan.needs_alignment
+
+        measured = Alignment(
+            offset=0, verdict=Verdict.RELIABLE, confidence=8.0, windows=(), reason="measured"
+        )
+        app.alignment = measured
+
+        app.allow_crop.set(True)
+        app._replan()  # what the checkbox's command does
+
+        assert app.alignment is measured, "the measurement was discarded"
         assert app.plan.ok
         assert str(app.run_button["state"]) == "normal"
 
