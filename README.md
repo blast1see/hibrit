@@ -6,10 +6,13 @@ without re-encoding a single frame.
 *hibrit* is Turkish for "hybrid", after the release naming convention this
 produces: `Title.2021.Hybrid.2160p.UHD.BluRay.REMUX.DV.HDR10Plus...`
 
-> **Status: usable, and honest about what it cannot check.** The metadata
-> transfer is proven byte-for-byte by the test suite, and has been run end to
-> end on 18 GB of a real dual-layer profile 7 remux: every coded picture unit
-> identical, the HDR10+ byte-identical, the existing Dolby Vision untouched.
+> **Status: usable, and honest about what it cannot check.** Run end to end on
+> a whole film — a 72.8 GiB dual-layer profile 7 UHD remux gaining HDR10+ from
+> a WEB-DL of the same title, 209,389 frames, 1h 31m. All five checks passed:
+> the HDR10+ read back byte-for-byte identical, the frame count unchanged, the
+> existing Dolby Vision untouched, and **all 1,675,112 coded picture units
+> identical to the original** — not one bit of picture data moved.
+>
 > Whether the two releases you point it at *should* share metadata is a
 > judgement no program can make; see
 > [The failure nothing here can catch](#the-failure-nothing-here-can-catch).
@@ -187,28 +190,49 @@ hibrit gui
 
 A target needs its video stream extracted, injected into, and remuxed, and when
 both kinds of metadata move there are three streams on disk at once before the
-remux joins them. Traced on a 72 GB remux, the peak comes to about 208 GB — so
+remux joins them. Measured on a 72.8 GiB remux, the peak comes to 211 GiB — so
 **three times the target's size** is the requirement.
 
 `--workdir` is required rather than defaulted for exactly this reason: the drive
 holding your sources is usually the one without the room. Checked against real volumes: a 72 GB job is refused on a drive with 42 GB free
 and on one with 193 GB, and accepted on one with room. Free space is
-checked before the first command runs, and each intermediate is deleted as soon
-as the next step has consumed it.
+checked before the first command runs, and every intermediate is deleted as soon
+as the next step has consumed it — with one deliberate exception, the extracted
+target stream, which the picture check needs something to compare against. It is
+freed once verification has read it, or immediately if `--no-picture-check` says
+that check is not wanted.
+
+The peak arrives twice by different routes and lands in the same place: during
+the remux the extracted stream, the injected stream and the growing output
+coexist; during verification the extracted stream, the finished output and the
+extraction taken from it do. Both measured at 211 GiB on a 72.8 GiB target,
+against the 218 GiB that three times over asks for.
 
 ## How long it takes
 
-Measured end to end on 60,000 frames of a real UHD remux — 18.2 GB, profile 7
-dual-layer, HDR10+ moved onto it:
+Measured end to end on a whole film: a 72.8 GiB profile 7 dual-layer remux,
+209,389 frames, gaining HDR10+ from a WEB-DL of the same title.
 
-| Step | Time |
-|---|---|
-| `hibrit run` (extract, inject, remux) | 7m 36s |
-| Verification, picture check included | 3m 48s |
+| Step | Time | Rate |
+|---|---|---|
+| Alignment (two windows of 12,558 frames) | 4m 30s | ~183 fps decoded |
+| `mkvextract` the target's video track | 12m 00s | 103 MB/s |
+| `hdr10plus_tool extract` + retime | 6m 48s | |
+| `hdr10plus_tool inject` | 14m 42s | 100 MB/s |
+| `mkvmerge` remux | 21m 24s | 60 MB/s |
+| Verification, picture check included | 31m 36s | |
+| **Total** | **1h 31m** | |
 
-That is about 120 MB/s of actual throughput across the three passes, so a 72 GB
-remux should be reckoned at half an hour or so, plus four and a half minutes if
-the frame counts differ and an alignment is needed.
+An earlier version of this section measured a 60,000-frame slice at 18.2 GB,
+took the 7m 36s that produced, and reckoned a 72 GB remux at "half an hour or
+so". The real answer is about an hour for the run and half an hour for the
+verification. Scaling by size was the wrong model: the remux pass runs at little
+more than half the rate of the extract, and at that point three files the size
+of a film are on one disk at once.
+
+Budget an evening rather than a coffee break, and note that the verification is
+a third of it — `--no-picture-check` buys most of that back, and gives up the
+one check that proves the picture did not move.
 
 ## The failure nothing here can catch
 
