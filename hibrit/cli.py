@@ -178,6 +178,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         approve=None if args.yes else _ask,
         keep_intermediates=args.keep,
         skip_reorder=args.skip_reorder,
+        # Nobody ever passed this, so --no-picture-check kept a 69 GB stream
+        # alive through the remux for a check it had just been told to skip.
+        # Handing the decision to the pipeline frees it during the run instead
+        # of after, which is where the peak is.
+        keep_clean_stream=args.verify_pixels,
     )
 
     if args.no_verify:
