@@ -255,7 +255,7 @@ class TestTheCroppedSourceIsNotADeadEnd:
         assert str(app.crop_check["state"]) == "normal", "no way to accept it"
 
         app.allow_crop.set(True)
-        app._reprobe()
+        app._replan()  # what the checkbox's command does
 
         assert app.plan.ok
         assert str(app.run_button["state"]) == "normal"
@@ -304,6 +304,24 @@ class TestTheCroppedSourceIsNotADeadEnd:
 
         assert not app.plan.ok
         assert str(app.crop_check["state"]) == "disabled"
+
+    def test_a_new_pair_does_not_inherit_the_tick(self, app, monkeypatch, tmp_path: Path) -> None:
+        """Accepting a crop is a judgement about one pair, not a preference."""
+        self._pair(monkeypatch, source_h=1606, target_h=2160)
+        app.source_path.set("web.mkv")
+        app.target_path.set("remux.mkv")
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+        app.allow_crop.set(True)
+        app._replan()
+        assert app.plan.ok
+
+        # A different pair arrives; the acceptance must not carry over.
+        self._pair(monkeypatch, source_h=1606, target_h=2160)
+        app._reprobe()
+        assert app.allow_crop.get() is False
+        assert not app.plan.ok
 
     def test_it_is_not_offered_when_the_shapes_already_match(
         self, app, monkeypatch, tmp_path: Path
