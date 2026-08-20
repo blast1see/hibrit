@@ -29,7 +29,7 @@ half-written file, and says what to do instead.
 
 ### Frame alignment
 
-Both files are decoded to 128×72 grayscale — about 250 fps for 4K HEVC — and
+Both files are decoded to 128×72 grayscale — about 180 fps for 4K HEVC — and
 reduced to one number per frame, which is cross-correlated to find the offset.
 
 The signal is the clipped absolute frame-to-frame difference, not mean
@@ -46,6 +46,34 @@ that was too narrow, not as an answer.
 Thresholds scale with the material rather than being fixed frame counts: a
 three-hour remux and a forty-second clip are four orders of magnitude apart.
 
+What it returns is **one** offset, and two releases do not always differ by one.
+Measured on a real pair: -26 frames for the film and -24 for the first 38
+seconds, where two frames are dropped at the handover out of the opening titles.
+The reported number is right for 99.5% of the runtime and wrong for the opening.
+The two-window rule does not catch that and is not meant to — a splice affecting
+five hundred frames out of a hundred and eighty thousand is a minority inside
+any window wide enough to correlate.
+
+### When only part of the job is possible
+
+A streaming release is usually cropped to its own picture while the disc keeps
+the bars inside the frame — 3840x1598 against 3840x2160 for the same film. The
+mismatch means different things depending on what is moving, so the refusal says
+which one applies:
+
+* the **RPU** cannot move at all. Level 5 offsets are pixel counts in the source
+  frame, and a 2160-row offset points at rows a 1598-row frame does not have.
+* **HDR10+** can, with `--allow-crop`. Its per-frame values are measurements of
+  the frame the encoder saw, which is a different set of pixels rather than
+  misplaced geometry — something a person can knowingly accept. The warning says
+  plainly that the transfer will finish and every check will pass.
+
+`--only dv` / `--only hdr10plus` limits the transfer to one kind, and the
+refusal names it: when the RPU is what blocks the job and something else was
+moving too, the message says which flag gets the rest through. The window has
+the same controls, because a plan that prints advice the interface cannot act on
+is a dead end.
+
 ### Verification
 
 The output is checked against the inputs it was built from. The RPU and HDR10+
@@ -60,10 +88,21 @@ fails on a clip straight out of ffmpeg. Restricting the hash to picture data
 answers the question exactly and costs a read rather than a rewrite, so it runs
 by default.
 
+Two full films have been through this end to end. The stronger result is the one
+this project had no hand in: for *The Prestige* there is a hybrid remux made
+independently by someone else, and taking the same WEB-DL, aligning it with the
+offset align() measured and retiming the metadata produces a file with the same
+SHA-256 as the HDR10+ already inside that release — 188,047,925 bytes, 187,467
+frames. Running the transfer for real then produced a file equivalent to it: the
+same picture bit for bit and the same metadata, differing only in which audio and
+subtitle tracks it keeps, and there hibrit keeps the target's.
+
 ### Disk
 
-A target needs three times its size in working space — traced on a 72 GB remux,
-where three streams coexist before the remux and the peak comes to about 208 GB.
+A target needs three times its size in working space — measured on a 72.8 GiB
+remux, where the peak comes to 211 GiB. It arrives twice by different routes:
+three streams coexist before the remux, and verification later holds the
+extracted target, the finished output and an extraction taken from it.
 `--workdir` is required rather than defaulted, because the drive holding the
 sources is usually the one without the room. Free space is checked before the
 first command runs, and each intermediate is deleted as soon as the next step
@@ -99,3 +138,9 @@ The fourth drives the window, and needs a display.
 About half of the tests in the upper two tiers feed inputs that should be
 refused: a shortened RPU, a lengthened one, two unrelated films, a search range
 too narrow to contain the answer.
+
+Where a test can hand its result to the tool that has to accept it, it does. A
+retiming config can be arithmetically right and still be rejected — `remove`
+entries apply in sequence while `duplicate` entries apply together, so a prepend
+does not move the index of the last frame — and that only shows up when the
+generated config goes through the real editor.
