@@ -145,6 +145,63 @@ class TestRefusals:
         target = make_info("remux.mkv", width=3840, height=2160, frames=1000)
         assert "--allow-crop" not in _blocker_texts(build_plan(source, target))
 
+    def test_nothing_to_transfer_is_not_buried_under_how_to_transfer_it(self) -> None:
+        """A Hybrid remux against a WEB-DL of the same film: both already have both.
+
+        The one thing worth saying is that there is nothing to move. What came
+        out instead was that line plus a resolution blocker offering
+        --allow-crop, a frame-rate blocker, and a retiming warning -- three
+        answers to a question nobody asked, and the flag could not have helped,
+        because no metadata was moving for it to apply to.
+        """
+        source = make_info(
+            "web.mkv",
+            width=3840,
+            height=1598,
+            frames=187_412,
+            rate=Fraction(24000, 1001),
+            hdr10plus=True,
+            dv=True,
+            dv_profile=8,
+        )
+        target = make_info(
+            "remux.mkv",
+            width=3840,
+            height=2160,
+            frames=187_467,
+            rate=Fraction(24000, 1001),
+            hdr10plus=True,
+            dv=True,
+            dv_profile=8,
+        )
+        plan = build_plan(source, target)
+
+        assert plan.transfer == ()
+        assert not plan.ok
+        assert len(plan.blockers) == 1, [n.text for n in plan.blockers]
+
+        text = _blocker_texts(plan)
+        assert "nothing left to transfer" in text
+        assert "--allow-crop" not in text
+        assert "resolution differs" not in text
+
+        everything = _all_texts(plan)
+        assert "frame rate differs" not in everything
+        assert "frame counts differ" not in everything
+        assert not plan.needs_alignment
+
+    def test_the_mechanics_still_apply_once_something_moves(self) -> None:
+        """The guard must not silence the checks when they are the point."""
+        source = make_info(
+            "web.mkv", width=3840, height=1598, frames=1000, hdr10plus=True, dv=True, dv_profile=8
+        )
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1008, dv=True, dv_profile=7)
+        plan = build_plan(source, target)
+
+        assert plan.transfer == (Kind.HDR10PLUS,)
+        assert "resolution differs" in _blocker_texts(plan)
+        assert "frame counts differ" in _all_texts(plan)
+
     def test_frame_rate_mismatch_is_refused(self) -> None:
         source = make_info("web.mkv", dv=True, dv_profile=8, rate=Fraction(25), frames=1000)
         target = make_info("bluray.mkv", rate=Fraction(24000, 1001), frames=1000)
