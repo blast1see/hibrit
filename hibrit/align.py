@@ -58,6 +58,21 @@ with crop detection: adding a constant black border multiplies every frame's
 mean by the same factor and adds the same offset, so the frame-to-frame
 *difference* is scaled by a constant, and a normalised correlation does not
 care about a constant. The cuts stay exactly where they were.
+
+The limitation worth knowing about is that this returns **one** offset, and two
+releases do not always differ by one. Measured on a real pair -- The Prestige,
+a UHD remux against an iTunes WEB-DL -- the answer is -26 frames for the film
+and -24 for the first 38 seconds: two frames are dropped somewhere between
+frame 908 and frame 927, at the handover from the opening titles. The reported
+-26 is right for 99.5% of the runtime and wrong for the opening, where it puts
+the metadata two frames out.
+
+Two windows agreeing does not catch this and is not meant to. That rule exists
+to reject releases that differ *structurally*; a splice affecting five hundred
+frames out of a hundred and eighty thousand is a minority inside any window
+wide enough to correlate, so the correlation converges on the dominant offset,
+which is the right answer to give. Knowing an edit list rather than an offset
+is a different program.
 """
 
 from __future__ import annotations

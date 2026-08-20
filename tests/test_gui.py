@@ -291,6 +291,47 @@ class TestTheCroppedSourceIsNotADeadEnd:
         assert app.plan.ok
         assert str(app.run_button["state"]) == "normal"
 
+    def test_the_window_can_do_what_the_plan_tells_it_to(self, app, monkeypatch, tmp_path) -> None:
+        """The blocker says "add --only hdr10plus --allow-crop". So must the window.
+
+        A cropped source donating both kinds is refused because of the RPU, and
+        the crop box is deliberately disabled while the RPU is moving. Without
+        a way to drop the RPU that is a dead end: the window prints advice made
+        of flags it does not have and then disables Run.
+        """
+        self._pair(monkeypatch, source_h=1598, target_h=2160, moving_rpu=True)
+        app.source_path.set("web.mkv")
+        app.target_path.set("remux.mkv")
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+
+        assert not app.plan.ok
+        assert str(app.crop_check["state"]) == "disabled", "not while the RPU is moving"
+        assert any("--only" in n.text for n in app.plan.notes), "the advice should be there"
+
+        # Which is exactly what the boxes are for.
+        app.move_dv.set(False)
+        app._replan()
+        assert [k.label for k in app.plan.transfer] == ["HDR10+"]
+        assert str(app.crop_check["state"]) == "normal", "now it would change the answer"
+
+        app.allow_crop.set(True)
+        app._replan()
+        assert app.plan.ok
+        assert str(app.run_button["state"]) == "normal"
+
+    def test_a_kind_the_source_lacks_is_not_offered(self, app, monkeypatch, tmp_path) -> None:
+        self._pair(monkeypatch, source_h=1598, target_h=2160)  # HDR10+ only
+        app.source_path.set("web.mkv")
+        app.target_path.set("remux.mkv")
+        app.workdir_path.set(str(tmp_path))
+        app.output_path.set(str(tmp_path / "out.mkv"))
+        app._reprobe()
+
+        assert str(app.hdr10plus_check["state"]) == "normal"
+        assert str(app.dv_check["state"]) == "normal"  # this source does carry DV
+
     def test_it_is_not_offered_when_the_rpu_is_the_thing_moving(
         self, app, monkeypatch, tmp_path: Path
     ) -> None:

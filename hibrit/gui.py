@@ -61,6 +61,10 @@ class App(ttk.Frame):
         self.alignment_text = tk.StringVar(value="not measured")
         self.override = tk.BooleanVar(value=False)
         self.allow_crop = tk.BooleanVar(value=False)
+        # Both on: the default is to move everything the source has and the
+        # target lacks, which is what an unticked pair of boxes would contradict.
+        self.move_dv = tk.BooleanVar(value=True)
+        self.move_hdr10plus = tk.BooleanVar(value=True)
         # On by default: the check reads the two streams once and compares only
         # their coded picture units, so it costs a read rather than a rewrite.
         self.verify_pixels = tk.BooleanVar(value=True)
@@ -153,6 +157,28 @@ class App(ttk.Frame):
             state="disabled",
         )
         self.override_check.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        # Which kinds to move. These exist because the planner will tell you
+        # that the RPU cannot move while the HDR10+ still can -- advice the
+        # window could print and not act on, which is worse than silence.
+        kinds_row = ttk.Frame(align_frame)
+        kinds_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(kinds_row, text="Move:").grid(row=0, column=0, padx=(0, 8))
+        self.dv_check = ttk.Checkbutton(
+            kinds_row,
+            text="Dolby Vision",
+            variable=self.move_dv,
+            command=self._replan,
+            state="disabled",
+        )
+        self.dv_check.grid(row=0, column=1, padx=(0, 12))
+        self.hdr10plus_check = ttk.Checkbutton(
+            kinds_row,
+            text="HDR10+",
+            variable=self.move_hdr10plus,
+            command=self._replan,
+            state="disabled",
+        )
+        self.hdr10plus_check.grid(row=0, column=2)
         # The other thing a plan can be blocked on that a person can knowingly
         # accept. Without it the window shows a blocker telling the user to
         # pass a command-line flag, then disables Run: a dead end reached by
@@ -165,7 +191,7 @@ class App(ttk.Frame):
             command=self._replan,
             state="disabled",
         )
-        self.crop_check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.crop_check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         row += 1
 
         # --- actions ------------------------------------------------------------
@@ -266,11 +292,16 @@ class App(ttk.Frame):
         # would silently accept a crop nobody looked at, and it has to happen
         # before the plan is built rather than after.
         self.allow_crop.set(False)
+        self.move_dv.set(True)
+        self.move_hdr10plus.set(True)
         try:
             self.source_info = probe(Path(source), self.box)
             self.target_info = probe(Path(target), self.box)
             self.plan = build_plan(
-                self.source_info, self.target_info, allow_crop=self.allow_crop.get()
+                self.source_info,
+                self.target_info,
+                allow_crop=self.allow_crop.get(),
+                kinds=self._chosen_kinds(),
             )
         except Exception as error:
             messagebox.showerror("Could not read the files", str(error))
@@ -280,17 +311,42 @@ class App(ttk.Frame):
         self._show_space()
         self.alignment = None
         self.override.set(False)
-        # Offered only when it would change the answer: the resolutions differ
-        # and the RPU is staying put. It never applies to a moving RPU.
-        resolutions_differ = self.source_info.resolution != self.target_info.resolution
-        moving_rpu = any(kind is Kind.DV for kind in self.plan.transfer)
-        self.crop_check["state"] = "normal" if resolutions_differ and not moving_rpu else "disabled"
+        # Each box is offered only when the source has that kind to give.
+        self.dv_check["state"] = "normal" if self.source_info.has_dv else "disabled"
+        self.hdr10plus_check["state"] = "normal" if self.source_info.has_hdr10plus else "disabled"
+        self._refresh_crop_check()
         self.alignment_text.set(
             "not measured" if self.plan.needs_alignment else "not needed — frame counts match"
         )
         self.align_button["state"] = "normal" if self.plan.needs_alignment else "disabled"
         self.override_check["state"] = "disabled"
         self._refresh_run_button()
+
+    def _refresh_crop_check(self) -> None:
+        """Offered only when ticking it would change the answer.
+
+        That is: the resolutions differ and the RPU is staying put. It has to
+        be rechecked whenever the kinds change, because unticking Dolby Vision
+        is exactly what turns this box from useless into the way through.
+        """
+        if self.source_info is None or self.target_info is None or self.plan is None:
+            return
+        differ = self.source_info.resolution != self.target_info.resolution
+        moving_rpu = any(kind is Kind.DV for kind in self.plan.transfer)
+        self.crop_check["state"] = "normal" if differ and not moving_rpu else "disabled"
+
+    def _chosen_kinds(self):
+        """The kinds the boxes are asking for, or None for "everything".
+
+        None rather than the full tuple when both are ticked, so the default
+        path through build_plan stays the one the command line exercises.
+        """
+        chosen = []
+        if self.move_dv.get():
+            chosen.append(Kind.DV)
+        if self.move_hdr10plus.get():
+            chosen.append(Kind.HDR10PLUS)
+        return None if len(chosen) == 2 else tuple(chosen)
 
     def _replan(self) -> None:
         """Rebuild the plan without disturbing a measured alignment.
@@ -301,8 +357,14 @@ class App(ttk.Frame):
         """
         if self.source_info is None or self.target_info is None:
             return
-        self.plan = build_plan(self.source_info, self.target_info, allow_crop=self.allow_crop.get())
+        self.plan = build_plan(
+            self.source_info,
+            self.target_info,
+            allow_crop=self.allow_crop.get(),
+            kinds=self._chosen_kinds(),
+        )
         self._render_plan(self.plan)
+        self._refresh_crop_check()
         self._refresh_run_button()
 
     def _render_plan(self, plan: Plan) -> None:
