@@ -1,0 +1,22 @@
+Put dovi_tool.exe and hdr10plus_tool.exe in this folder.
+
+`hibrit doctor` tells you which of them it cannot find, and this is the folder
+it looks in first. Anywhere on PATH works too; this folder is here so there is
+somewhere obvious to drop them.
+
+    dovi_tool        https://github.com/quietvoid/dovi_tool/releases
+    hdr10plus_tool   https://github.com/quietvoid/hdr10plus_tool/releases
+
+Both are single Windows executables inside a zip. Unzip, take the .exe, drop it
+here, and run `hibrit doctor` again.
+
+You may also need, if they are not already on PATH:
+
+    mediainfo (CLI)  https://mediaarea.net/en/MediaInfo/Download
+    ffmpeg           https://www.gyan.dev/ffmpeg/builds/
+    mkvmerge         https://mkvtoolnix.download/
+    mkvextract       (ships with MKVToolNix)
+
+They are deliberately not bundled. dovi_tool and hdr10plus_tool are separate
+GPL programs under active development, and a frozen copy would go stale without
+saying so — the version that matters here reads streams an older build does not.

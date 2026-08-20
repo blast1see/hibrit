@@ -89,3 +89,18 @@ COLLECT(
     upx=False,
     name="hibrit",
 )
+
+# `doctor` tells the user to put the missing binaries in hibrit/tools/, and that
+# folder did not exist in the build -- so the advice ended with the reader
+# guessing whether to create it and where. Shipping it with a note inside turns
+# "guess" into "open this and drop them in".
+#
+# Not through `datas`: PyInstaller puts those under _internal/, and
+# bundled_tools_dir() looks next to the executable. Measured on the unpacked
+# 0.1.0 release -- tools placed beside the exe are found, tools under _internal
+# are not.
+import shutil  # noqa: E402
+
+_tools = Path(DISTPATH) / "hibrit" / "tools"
+_tools.mkdir(parents=True, exist_ok=True)
+shutil.copy2(ROOT / "packaging" / "tools-placeholder.txt", _tools / "README.txt")

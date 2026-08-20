@@ -83,3 +83,37 @@ class TestPackagedVersion:
         version = release_notes.packaged_version()
         changelog = release_notes.CHANGELOG.read_text(encoding="utf-8")
         assert release_notes.section_for(version, changelog)
+
+
+class TestThePackagedLayout:
+    """What the reader finds after unzipping is part of the product.
+
+    `doctor` tells them to put the missing binaries in hibrit/tools/. Until
+    0.1.0 shipped, that folder was not in the build, so the advice ended with
+    the reader guessing whether to create it and where. It is created next to
+    the executable rather than through `datas`, because PyInstaller puts datas
+    under _internal/ and bundled_tools_dir() looks beside the exe.
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def test_the_note_that_ships_in_the_tools_folder_exists(self) -> None:
+        note = self.ROOT / "packaging" / "tools-placeholder.txt"
+        assert note.exists(), "the spec copies this into the build"
+        text = note.read_text(encoding="utf-8")
+        assert "dovi_tool" in text and "hdr10plus_tool" in text
+        assert "releases" in text, "it has to say where to get them"
+
+    def test_the_spec_puts_it_beside_the_executable(self) -> None:
+        spec = (self.ROOT / "hibrit.spec").read_text(encoding="utf-8")
+        assert "tools-placeholder.txt" in spec
+        # Beside the exe, not under _internal: DISTPATH rather than datas.
+        assert 'Path(DISTPATH) / "hibrit" / "tools"' in spec
+
+    def test_doctor_points_at_the_folder_the_build_ships(self) -> None:
+        """The message and the layout have to agree, or one of them is a lie."""
+        from hibrit import cli
+
+        source = (self.ROOT / "hibrit" / "cli.py").read_text(encoding="utf-8")
+        assert "hibrit/tools/" in source
+        assert cli is not None
