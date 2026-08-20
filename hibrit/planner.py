@@ -273,7 +273,19 @@ def build_plan(
     # are measurements of the frame the encoder saw. Crop a quarter of the rows
     # off that frame, or add them back as black, and the same numbers now
     # describe a different set of pixels.
-    if source.resolution and target.resolution and source.resolution != target.resolution:
+    # Everything from here to the end of this section is about *how* to move
+    # metadata, so none of it applies when there is none to move. Handed a
+    # Hybrid remux that already has both kinds, this used to answer with the one
+    # blocker that mattered and then three more about geometry, frame rates and
+    # retiming -- including an offer of --allow-crop, a flag that cannot help
+    # when nothing is being transferred. The real message was the first line,
+    # and it was the one buried.
+    if (
+        transfer
+        and source.resolution
+        and target.resolution
+        and source.resolution != target.resolution
+    ):
         moving_rpu = Kind.DV in transfer
         if moving_rpu:
             why = (
@@ -314,7 +326,12 @@ def build_plan(
         else:
             notes.append(Note(Level.BLOCKER, f"{head} Pass --allow-crop to accept this."))
 
-    if source.frame_rate and target.frame_rate and source.frame_rate != target.frame_rate:
+    if (
+        transfer
+        and source.frame_rate
+        and target.frame_rate
+        and source.frame_rate != target.frame_rate
+    ):
         notes.append(
             Note(
                 Level.BLOCKER,
@@ -389,7 +406,7 @@ def build_plan(
             )
 
     # --- alignment ---------------------------------------------------------------
-    frames_differ = (
+    frames_differ = bool(transfer) and (
         source.frame_count is not None
         and target.frame_count is not None
         and source.frame_count != target.frame_count
