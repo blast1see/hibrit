@@ -500,6 +500,25 @@ def edit_config_for_offset(offset: int, source_frames: int, target_frames: int) 
     *target_frames* exactly. Padding repeats the nearest real frame, which is
     what dovi_tool would have done implicitly — the difference is that here it
     is a deliberate, reported edit rather than a warning nobody reads.
+
+    The index space is not obvious and is not symmetric. Measured against
+    hdr10plus_tool 1.7.2 and dovi_tool 2.3.3 on a ten-frame file:
+
+    * ``remove`` entries apply **in sequence**. ``["0-1", "6-7"]`` removes two
+      from the front and then two from what is left; ``["0-1", "8-9"]`` is
+      rejected, because after the first removal there is no frame 9.
+    * ``duplicate`` entries apply **together**, against the state after the
+      removals. So a prepend does not move the index of the last frame:
+      ``[{source: 0, ...}, {source: 9, ...}]`` is right for ten frames, and
+      counting the prepended frames into the tail index is an error the tool
+      refuses outright.
+
+    That second rule cost a run. Building the tail duplicate in the space after
+    the prepend produced ``source: 187437`` for a source with 187412 frames,
+    and hdr10plus_tool answered ``invalid duplicate``. Nothing caught it because
+    the two-edit case only arises when the offset is non-zero *and* the lengths
+    differ, and the tests until now checked the arithmetic without ever handing
+    the result to the tool that has to accept it.
     """
     config: dict = {}
     remove: list[str] = []
@@ -509,15 +528,17 @@ def edit_config_for_offset(offset: int, source_frames: int, target_frames: int) 
     if offset > 0:
         remove.append(f"0-{offset - 1}")
         remaining -= offset
-    elif offset < 0:
-        duplicate.append({"source": 0, "offset": 0, "length": -offset})
-        remaining += -offset
+    prepend = -offset if offset < 0 else 0
 
-    if remaining > target_frames:
-        surplus = remaining - target_frames
+    if remaining + prepend > target_frames:
+        surplus = remaining + prepend - target_frames
         remove.append(f"{remaining - surplus}-{remaining - 1}")
-    elif remaining < target_frames:
-        shortfall = target_frames - remaining
+        remaining -= surplus
+
+    if prepend:
+        duplicate.append({"source": 0, "offset": 0, "length": prepend})
+    if remaining + prepend < target_frames:
+        shortfall = target_frames - remaining - prepend
         duplicate.append({"source": remaining - 1, "offset": remaining, "length": shortfall})
 
     if remove:

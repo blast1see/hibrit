@@ -805,6 +805,77 @@ class TestHdr10PlusRetiming:
         assert report.passed, report.describe()
 
 
+class TestRetimingConfigsTheToolAccepts:
+    """The arithmetic was tested. Whether the tool accepts it was not.
+
+    edit_config_for_offset built the tail duplicate in the index space that
+    exists *after* the prepend, and hdr10plus_tool indexes duplicates against
+    the state before any of them. A real pair -- offset -26, 187412 frames into
+    187467 -- produced ``source: 187437`` for a file whose last frame is 187411,
+    and the tool answered ``invalid duplicate`` and stopped the run.
+
+    These hand the generated config to the tool that has to take it, which is
+    the only test that could have caught that.
+    """
+
+    @staticmethod
+    def _identifiable(path: Path, frames: int) -> Path:
+        """A metadata file whose frames can be told apart after editing."""
+        payload = _hdr10plus_json(frames)
+        for index, scene in enumerate(payload["SceneInfo"]):
+            scene["LuminanceParameters"]["AverageRGB"] = 100 + index
+        payload["SceneInfoSummary"] = {
+            "SceneFirstFrameIndex": [0],
+            "SceneFrameNumbers": [frames],
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _values(path: Path) -> list[int]:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        return [s["LuminanceParameters"]["AverageRGB"] for s in payload["SceneInfo"]]
+
+    @pytest.mark.parametrize(
+        ("offset", "source_frames", "target_frames"),
+        [
+            (0, 10, 14),  # pad the tail only -- the case that always worked
+            (-2, 10, 14),  # prepend *and* pad: the combination that failed
+            (-4, 10, 10),  # prepend and trim
+            (2, 10, 14),  # drop the head and pad
+            (2, 10, 6),  # drop the head and trim
+            (0, 10, 6),  # trim only
+        ],
+    )
+    def test_the_tool_takes_the_config_and_lands_on_the_target_length(
+        self, toolbox, tmp_path: Path, offset: int, source_frames: int, target_frames: int
+    ) -> None:
+        from hibrit.align import edit_config_for_offset
+
+        source = self._identifiable(tmp_path / "base.json", source_frames)
+        config = edit_config_for_offset(offset, source_frames, target_frames)
+
+        out = Hdr10PlusTool(toolbox).editor(source, config, tmp_path / "out.json", workdir=tmp_path)
+        values = self._values(out)
+
+        assert len(values) == target_frames, f"{config} produced {len(values)} frames"
+        # Padding repeats a real frame rather than inventing one, so every value
+        # still has to be one the source actually had.
+        assert set(values) <= set(range(100, 100 + source_frames))
+
+    def test_a_prepend_repeats_the_first_frame_and_keeps_the_rest_in_order(
+        self, toolbox, tmp_path: Path
+    ) -> None:
+        from hibrit.align import edit_config_for_offset
+
+        source = self._identifiable(tmp_path / "base.json", 10)
+        config = edit_config_for_offset(-2, 10, 14)
+        out = Hdr10PlusTool(toolbox).editor(source, config, tmp_path / "out.json", workdir=tmp_path)
+
+        # Two copies of the first frame, the ten real ones, two of the last.
+        assert self._values(out) == [100, 100, *range(100, 110), 109, 109]
+
+
 class TestContainer:
     def test_a_stream_survives_a_matroska_round_trip(
         self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
