@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3
+
+`hibrit plot -o` told the packaged build's user to `pip install`, which is
+advice they cannot follow: the zip has no Python in it. It now says what is
+actually true there -- comparing two files works without matplotlib, so drop
+the `-o` -- and keeps the pip line for source installs, where it works.
+
+Caught by running the published zip rather than the source tree.
+
 ## 0.1.2
 
 ### `hibrit plot`
