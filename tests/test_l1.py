@@ -187,3 +187,34 @@ def test_comparison_notices_an_average_only_difference():
     assert result.peak_delta == pytest.approx(0.0)
     assert result.average_delta == pytest.approx(70.0)
     assert result.differing.tolist() == [1]
+
+
+# --------------------------------------------------------------------------
+# The message someone sees when they cannot draw
+# --------------------------------------------------------------------------
+
+
+def test_packaged_build_is_not_told_to_pip_install(monkeypatch):
+    """The zip has no Python in it, so pip advice is a dead end.
+
+    Comparing is the half of this command that matters, and it works without
+    matplotlib, so the packaged build should say that instead.
+    """
+    import sys
+
+    from hibrit.l1 import _no_matplotlib
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    message = _no_matplotlib()
+
+    assert "drop the -o" in message
+    assert "Comparing two files still works" in message
+
+
+def test_source_install_is_told_how_to_get_matplotlib(monkeypatch):
+    import sys
+
+    from hibrit.l1 import _no_matplotlib
+
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert "pip install" in _no_matplotlib()

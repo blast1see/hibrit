@@ -149,6 +149,29 @@ def compare(a: L1Curve, b: L1Curve, *, tolerance: float = 0.01) -> Divergence:
     )
 
 
+def _no_matplotlib() -> str:
+    """What to tell someone whose build cannot draw.
+
+    The packaged build has no Python to install into, so telling its user to
+    pip install something is advice they cannot follow. The comparison is the
+    half of this command that matters and it works either way, so say that
+    rather than leaving them at a dead end.
+    """
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return (
+            "this packaged build cannot draw plots: matplotlib is not bundled, "
+            "and doubling the download for it is not worth it. Comparing two "
+            "files still works and needs no plot -- drop the -o. To draw, "
+            "install from source: pip install 'hibrit[plot]'"
+        )
+    return (
+        "plotting needs matplotlib, which hibrit does not install by default. "
+        "Install it with:  pip install 'hibrit[plot]'"
+    )
+
+
 def render(
     curve: L1Curve,
     out: Path,
@@ -169,10 +192,7 @@ def render(
         import matplotlib.pyplot as plt
         from matplotlib.ticker import FixedFormatter, FixedLocator
     except ImportError as exc:  # pragma: no cover - depends on the environment
-        raise RuntimeError(
-            "plotting needs matplotlib, which hibrit does not install by "
-            "default. Install it with:  pip install 'hibrit[plot]'"
-        ) from exc
+        raise RuntimeError(_no_matplotlib()) from exc
 
     # A log axis cannot show zero, and the minimum curve sits at zero for most
     # of a film. Everything is clamped to the bottom of the axis instead.
