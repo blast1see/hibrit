@@ -155,6 +155,16 @@ class DoviTool:
         self.box.run("dovi_tool", ["export", "-i", str(rpu), "-d", f"{what}={out}"])
         return out
 
+    def export_levels(self, rpu: Path, out: Path, level: str = "level1") -> Path:
+        """Export one metadata level as CSV, one row per frame.
+
+        Separate from :meth:`export` because it is a different flag with a
+        different output format: ``--data`` writes JSON, ``--levels`` writes
+        CSV, and only the latter reaches L1 through L11.
+        """
+        self.box.run("dovi_tool", ["export", "-i", str(rpu), "--levels", f"{level}={out}"])
+        return out
+
     # -- editing ---------------------------------------------------------
 
     def editor(self, rpu: Path, config: dict[str, Any], out: Path, *, workdir: Path) -> Path:
