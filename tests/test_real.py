@@ -599,7 +599,7 @@ class TestProfile7Reporting:
         assert DoviTool(toolbox).info(result.rpu).profile == 8
 
     def test_a_fel_source_is_reported_as_a_loss(self, toolbox, tmp_path: Path) -> None:
-        """HIBRIT_FEL points at one of the library's 64 FEL remuxes."""
+        """HIBRIT_FEL points at a real profile 7 FEL remux."""
         import os
 
         from hibrit.pipeline import run
