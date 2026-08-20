@@ -13,6 +13,14 @@ produces: `Title.2021.Hybrid.2160p.UHD.BluRay.REMUX.DV.HDR10Plus...`
 > existing Dolby Vision untouched, and **all 1,675,112 coded picture units
 > identical to the original** — not one bit of picture data moved.
 >
+> Then checked against work this project had no hand in. For *The Prestige*
+> there is a hybrid remux made independently by someone else. Taking the same
+> iTunes WEB-DL, aligning it with hibrit's measured offset of -26 frames and
+> retiming the metadata produces a file with **the same SHA-256** as the HDR10+
+> already inside that release: 188,047,925 bytes, 187,467 frames, 2,625 scenes.
+> A stranger reached the same answer, which is the one kind of confirmation a
+> program cannot give itself.
+>
 > Whether the two releases you point it at *should* share metadata is a
 > judgement no program can make; see
 > [The failure nothing here can catch](#the-failure-nothing-here-can-catch).
