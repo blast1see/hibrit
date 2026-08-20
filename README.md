@@ -19,7 +19,10 @@ produces: `Title.2021.Hybrid.2160p.UHD.BluRay.REMUX.DV.HDR10Plus...`
 > retiming the metadata produces a file with **the same SHA-256** as the HDR10+
 > already inside that release: 188,047,925 bytes, 187,467 frames, 2,625 scenes.
 > A stranger reached the same answer, which is the one kind of confirmation a
-> program cannot give itself.
+> program cannot give itself. Running the transfer for real then produced a
+> file **equivalent to that release**: the same picture bit for bit and the
+> same HDR10+ by SHA-256, differing only in which audio and subtitle tracks it
+> keeps — and there hibrit keeps the target's.
 >
 > Whether the two releases you point it at *should* share metadata is a
 > judgement no program can make; see
