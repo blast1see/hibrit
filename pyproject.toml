@@ -21,6 +21,9 @@ dev = [
     "ruff>=0.11",
 ]
 build = ["pyinstaller>=6.12"]
+# Only `hibrit plot` needs this, and bundling it would roughly double the
+# packaged build for a command most people never run.
+plot = ["matplotlib>=3.8"]
 
 [project.scripts]
 hibrit = "hibrit.__main__:main"

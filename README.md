@@ -185,11 +185,40 @@ hibrit align web-dl.mkv bluray-remux.mkv
 
 # Do it.
 hibrit run web-dl.mkv bluray-remux.mkv -o hybrid.mkv --workdir E:\work
+
+# Do the two releases carry the same L1 metadata, frame for frame?
+hibrit plot web-dl.mkv bluray-remux.mkv
 ```
 
 `source` is the file that **has** the metadata. `target` is the file whose
 **picture** you want to keep. The output is the target's video with the source's
 metadata.
+
+### Plotting the metadata
+
+`hibrit plot` reads the L1 dynamic brightness out of an RPU and, given two
+files, says where they stop agreeing:
+
+```
+comparison: 24 of 3000 frames differ (frames 0-23); peak by up to 0.00 nits,
+average by up to 73.08 nits
+```
+
+That is a real pair: a UHD remux and a WEB-DL of the same film. Every frame
+past 23 is identical, and frame 24 is a scene cut -- the releases share a
+master and differ only in their opening. Measuring an offset from the first
+minute of that film gives the wrong answer; measuring from the middle gives
+the right one. This is the cheapest way to find out which you are looking at,
+because it never decodes the video: an RPU is a few megabytes.
+
+With `-o` it also draws the curve, in the style the plots that circulate on
+forums use. Drawing needs matplotlib, which is not installed by default
+because bundling it would roughly double the packaged build:
+
+```
+pip install 'hibrit[plot]'
+hibrit plot remux.mkv -o l1.png
+```
 
 There is a window if you prefer one:
 

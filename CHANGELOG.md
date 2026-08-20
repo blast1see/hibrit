@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### `hibrit plot`
+
+Reads the L1 dynamic brightness metadata out of an RPU, and compares two files
+frame for frame. Releases cut from the same master carry identical L1 curves,
+so where two curves diverge is where the releases diverge -- which is the
+question frame alignment turns on, answered without decoding a single frame.
+
+Measured on a real pair: a UHD remux and a WEB-DL of the same film agree on
+every one of 3000 frames except the first 24, and frame 24 is a scene cut.
+Their openings differ; the rest is the same master. An offset measured from
+the opening of that film is wrong, and nothing in the file says so.
+
+With `-o` it draws the curve as well. That needs matplotlib, installed with
+`pip install 'hibrit[plot]'` rather than by default -- bundling it would
+roughly double the packaged build for a command most people never run.
+
+
 ## 0.1.1
 
 `hibrit doctor` ends by telling you to put the missing binaries in

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
-from hibrit import __version__
+from hibrit import __version__, rpu
 from hibrit.align import Alignment, align
 from hibrit.planner import build_plan, parse_kinds
 from hibrit.probe import probe
@@ -230,6 +231,55 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
+def cmd_plot(args: argparse.Namespace) -> int:
+    """Draw an RPU's L1 curve, and optionally compare it with another file."""
+    from . import l1
+
+    box = _toolbox(args)
+    dovi = rpu.DoviTool(box)
+
+    with tempfile.TemporaryDirectory(prefix="hibrit-plot-") as tmp:
+        work = Path(tmp)
+        curves = []
+        for index, source in enumerate(args.files):
+            path = Path(source)
+            # An RPU straight off disk needs no extraction; anything else is a
+            # video the RPU has to come out of first.
+            if path.suffix.lower() == ".bin":
+                rpu_path = path
+            else:
+                rpu_path = dovi.extract_rpu(path, work / f"{index}.bin")
+            info = dovi.info(rpu_path)
+            csv_path = dovi.export_levels(rpu_path, work / f"{index}.csv")
+            curve = l1.load_l1(csv_path)
+            curves.append((path, info, curve))
+            print(f"{path.name}\n  {info.describe()}")
+            print(f"  MaxCLL {curve.maxcll:.2f} nits   MaxFALL {curve.maxfall:.2f} nits")
+
+        if len(curves) == 2:
+            divergence = l1.compare(curves[0][2], curves[1][2])
+            print(f"\ncomparison: {divergence.describe()}")
+            if divergence.identical:
+                print("  the same master, frame for frame")
+            else:
+                print("  where they differ is where the releases differ")
+
+        if args.output:
+            path, info, curve = curves[0]
+            notes = [f"L5 offsets: {info.l5_offsets}"] if info.l5_offsets else []
+            if info.dm_version:
+                notes.append(f"DM version: {info.dm_version}")
+            written = l1.render(
+                curve,
+                Path(args.output),
+                title=path.name,
+                subtitle=info.describe(),
+                notes=tuple(notes),
+            )
+            print(f"\nwrote {written}")
+    return 0
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     from hibrit.gui import main as gui_main
 
@@ -315,6 +365,11 @@ def build_parser() -> argparse.ArgumentParser:
     verify_cmd.add_argument("--clean-stream", help="the target's pre-injection .hevc stream")
     verify_cmd.add_argument("-w", "--workdir", required=True)
     verify_cmd.set_defaults(func=cmd_verify)
+
+    plot_cmd = sub.add_parser("plot", help="draw an RPU's L1 curve, or compare two")
+    plot_cmd.add_argument("files", nargs="+", help="RPU .bin files, or videos to extract from")
+    plot_cmd.add_argument("-o", "--output", help="write a PNG here")
+    plot_cmd.set_defaults(func=cmd_plot)
 
     gui_cmd = sub.add_parser("gui", help="open the window")
     gui_cmd.set_defaults(func=cmd_gui)
