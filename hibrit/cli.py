@@ -14,13 +14,19 @@ from pathlib import Path
 
 from hibrit import __version__
 from hibrit.align import Alignment, align
-from hibrit.planner import build_plan
+from hibrit.planner import build_plan, parse_kinds
 from hibrit.probe import probe
 from hibrit.tools import MissingTool, Toolbox, ToolFailed
 
 DEFAULT_WORKDIR_HINT = (
     "Pick a drive with room for roughly three times the target file. "
     "The drive holding your sources usually does not have it."
+)
+
+ONLY_HELP = (
+    "limit the transfer to one kind of metadata (dv, hdr10plus). Repeatable. "
+    "Useful when one kind can move and the other cannot: a cropped source can "
+    "donate its HDR10+ but not its RPU"
 )
 
 ALLOW_CROP_HELP = (
@@ -98,6 +104,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         probe(Path(args.target), box),
         replace_existing=args.replace,
         allow_crop=args.allow_crop,
+        kinds=parse_kinds(args.only) if args.only else None,
     )
     print(plan.describe())
     return 0 if plan.ok else 1
@@ -151,6 +158,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         probe(_existing(args.target, "target"), box),
         replace_existing=args.replace,
         allow_crop=args.allow_crop,
+        kinds=parse_kinds(args.only) if args.only else None,
     )
     print(plan.describe())
     print()
@@ -260,6 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--replace", action="store_true", help="overwrite metadata the target has"
     )
     plan_cmd.add_argument("--allow-crop", action="store_true", help=ALLOW_CROP_HELP)
+    plan_cmd.add_argument("--only", action="append", metavar="KIND", help=ONLY_HELP)
     plan_cmd.set_defaults(func=cmd_plan)
 
     align_cmd = sub.add_parser("align", help="measure the frame offset between two releases")
@@ -276,6 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_cmd.add_argument("-w", "--workdir", required=True, help=DEFAULT_WORKDIR_HINT)
     run_cmd.add_argument("--replace", action="store_true")
     run_cmd.add_argument("--allow-crop", action="store_true", help=ALLOW_CROP_HELP)
+    run_cmd.add_argument("--only", action="append", metavar="KIND", help=ONLY_HELP)
     run_cmd.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
     run_cmd.add_argument("-n", "--dry-run", action="store_true", help="print the plan and stop")
     run_cmd.add_argument("--keep", action="store_true", help="keep intermediate files")

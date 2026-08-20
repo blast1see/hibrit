@@ -45,6 +45,30 @@ class Kind(str, Enum):
         return "Dolby Vision" if self is Kind.DV else "HDR10+"
 
 
+#: What a person types for a kind on the command line. The enum values are
+#: "dolby-vision" and "hdr10plus"; nobody wants to type the first one.
+KIND_NAMES = {
+    "dv": Kind.DV,
+    "dolby-vision": Kind.DV,
+    "dolbyvision": Kind.DV,
+    "hdr10plus": Kind.HDR10PLUS,
+    "hdr10+": Kind.HDR10PLUS,
+}
+
+
+def parse_kinds(names) -> tuple[Kind, ...]:
+    """Turn what was typed into kinds, in a fixed order, without duplicates."""
+    chosen: list[Kind] = []
+    for name in names:
+        kind = KIND_NAMES.get(str(name).strip().lower())
+        if kind is None:
+            allowed = ", ".join(sorted({"dv", "hdr10plus"}))
+            raise ValueError(f"{name!r} is not a kind of metadata. Use one of: {allowed}.")
+        if kind not in chosen:
+            chosen.append(kind)
+    return tuple(k for k in (Kind.DV, Kind.HDR10PLUS) if k in chosen)
+
+
 class Level(str, Enum):
     """How much a note should stop the user."""
 
@@ -300,6 +324,18 @@ def build_plan(
             )
         head = f"resolution differs ({source.resolution} vs {target.resolution}). {why}."
 
+        # When the RPU is what blocks the job, the other kind may still be
+        # movable, and refusing without saying so leaves a usable job looking
+        # impossible. This is the shape a Hybrid pair takes: the geometry rules
+        # out the RPU for good, and the HDR10+ is a judgement the user is
+        # allowed to make.
+        rest = tuple(k for k in transfer if k is not Kind.DV)
+        partial = ""
+        if moving_rpu and rest:
+            names = " ".join(f"--only {k.value}" for k in rest)
+            moved = " and ".join(k.label for k in rest)
+            partial = f" {moved} could still move on its own: add {names} --allow-crop."
+
         if allow_crop and not moving_rpu:
             notes.append(
                 Note(
@@ -317,12 +353,13 @@ def build_plan(
                     f"{head} --allow-crop does not cover this: it accepts measurements "
                     "taken over a different set of pixels, not offsets pointing at rows "
                     "that do not exist. Rewriting the level 5 offsets to the target's "
-                    "geometry would be the real fix, and hibrit does not do it.",
+                    f"geometry would be the real fix, and hibrit does not do it.{partial}",
                 )
             )
         elif moving_rpu:
-            # No flag is offered here on purpose: there is nothing to opt into.
-            notes.append(Note(Level.BLOCKER, head))
+            # No flag is offered for the RPU itself: there is nothing to opt
+            # into. What the other kind can do is a different question.
+            notes.append(Note(Level.BLOCKER, f"{head}{partial}"))
         else:
             notes.append(Note(Level.BLOCKER, f"{head} Pass --allow-crop to accept this."))
 

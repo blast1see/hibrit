@@ -6,7 +6,7 @@ from fractions import Fraction
 
 from conftest import make_info
 
-from hibrit.planner import Kind, Level, build_plan
+from hibrit.planner import Kind, Level, build_plan, parse_kinds
 
 
 def _blocker_texts(plan) -> str:
@@ -144,6 +144,55 @@ class TestRefusals:
         source = make_info("web.mkv", width=3840, height=1606, frames=1000, dv=True, dv_profile=8)
         target = make_info("remux.mkv", width=3840, height=2160, frames=1000)
         assert "--allow-crop" not in _blocker_texts(build_plan(source, target))
+
+    def test_a_blocked_rpu_names_what_can_still_move(self) -> None:
+        """Refusing without saying so leaves a usable job looking impossible.
+
+        A cropped source cannot donate its RPU -- the geometry rules it out for
+        good -- but its HDR10+ is a judgement the user is allowed to make. The
+        refusal used to stop at the RPU and leave them there.
+        """
+        source = make_info(
+            "web.mkv", width=3840, height=1598, frames=1000, dv=True, dv_profile=8, hdr10plus=True
+        )
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1000)
+        plan = build_plan(source, target)
+
+        assert set(plan.transfer) == {Kind.DV, Kind.HDR10PLUS}
+        assert not plan.ok
+        text = _blocker_texts(plan)
+        assert "--only hdr10plus" in text
+        assert "--allow-crop" in text
+
+    def test_the_hint_is_absent_when_only_the_rpu_was_moving(self) -> None:
+        """Nothing else was going anywhere, so there is nothing to suggest."""
+        source = make_info("web.mkv", width=3840, height=1598, frames=1000, dv=True, dv_profile=8)
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1000)
+        assert "--only" not in _blocker_texts(build_plan(source, target))
+
+    def test_only_narrows_the_transfer(self) -> None:
+        source = make_info(
+            "web.mkv", width=3840, height=1598, frames=1000, dv=True, dv_profile=8, hdr10plus=True
+        )
+        target = make_info("remux.mkv", width=3840, height=2160, frames=1000)
+
+        plan = build_plan(source, target, kinds=(Kind.HDR10PLUS,), allow_crop=True)
+        assert plan.transfer == (Kind.HDR10PLUS,)
+        assert plan.ok, [n.text for n in plan.blockers]
+
+    def test_kind_names_are_what_a_person_would_type(self) -> None:
+        assert parse_kinds(["dv"]) == (Kind.DV,)
+        assert parse_kinds(["hdr10plus"]) == (Kind.HDR10PLUS,)
+        assert parse_kinds(["hdr10+"]) == (Kind.HDR10PLUS,)
+        # Order is fixed and duplicates collapse, so two spellings of one kind
+        # cannot produce a transfer list that repeats it.
+        assert parse_kinds(["hdr10+", "dv", "DV"]) == (Kind.DV, Kind.HDR10PLUS)
+
+    def test_an_unknown_kind_is_refused_with_the_list(self) -> None:
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="dv, hdr10plus"):
+            parse_kinds(["hdr10"])
 
     def test_nothing_to_transfer_is_not_buried_under_how_to_transfer_it(self) -> None:
         """A Hybrid remux against a WEB-DL of the same film: both already have both.
