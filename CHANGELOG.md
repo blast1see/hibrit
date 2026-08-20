@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1
+
+`hibrit doctor` ends by telling you to put the missing binaries in
+`hibrit/tools/`, and the 0.1.0 build did not contain that folder. Unzipping it
+and following the advice meant creating a directory and hoping it was the right
+one. It now ships, with a note inside naming the two tools and where to get
+them.
+
+Found by downloading the published 0.1.0 archive and using it. Every test until
+then had run against a source checkout, where `tools/` already exists — so the
+gap could only appear to someone starting from the zip.
+
 ## 0.1.0
 
 First release.
