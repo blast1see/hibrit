@@ -10,8 +10,8 @@ read this". Both are fixed, and the second one mattered.
 `dovi_tool info -s` describes a film's active area three ways:
 
 ```
-L5 offsets: top=281, ...      one shape for the whole film
-L5 offsets: top=0..281, ...   a shape that changes through it
+L5 offsets: top=280, ...      one shape for the whole film
+L5 offsets: top=0..280, ...   a shape that changes through it
 L5 offsets: top=N/A, ...      no level 5 in the RPU at all
 ```
 
