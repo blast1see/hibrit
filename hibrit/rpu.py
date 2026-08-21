@@ -40,10 +40,21 @@ _FRAMES_RE = re.compile(r"^\s*Frames:\s*(\d+)", re.MULTILINE)
 _PROFILE_RE = re.compile(r"^\s*Profile:\s*(\d+)(?:\s*\((?P<layer>\w+)\))?", re.MULTILINE)
 _DM_RE = re.compile(r"^\s*DM version:\s*(?P<dm>.+)$", re.MULTILINE)
 _SCENES_RE = re.compile(r"^\s*Scene/shot count:\s*(\d+)", re.MULTILINE)
+#: One field of the L5 line. dovi_tool prints three forms and they are three
+#: different facts: `281` for an edge that holds still, `0..281` for one that
+#: moves through the film, and `N/A` for an RPU carrying no level 5 at all.
+#: Matching only the first collapsed the other two into "no offsets".
+_L5_FIELD = r"(N/A|\d+(?:\.\.\d+)?)"
 _L5_RE = re.compile(
-    r"^\s*L5 offsets:\s*top=(\d+),\s*bottom=(\d+),\s*left=(\d+),\s*right=(\d+)",
+    rf"^\s*L5 offsets:\s*top={_L5_FIELD},\s*bottom={_L5_FIELD},"
+    rf"\s*left={_L5_FIELD},\s*right={_L5_FIELD}",
     re.MULTILINE,
 )
+#: The same line, read loosely, so that "dovi_tool printed offsets I cannot
+#: read" can be told apart from "dovi_tool printed no offsets". Without this
+#: pair the two collapse, which is the bug the strict pattern above was widened
+#: to fix — and it would come back the next time the format moves.
+_L5_LINE_RE = re.compile(r"^\s*L5 offsets:.*$", re.MULTILINE)
 
 
 class FrameCountMismatch(RuntimeError):
@@ -65,6 +76,58 @@ class FrameCountMismatch(RuntimeError):
 
 
 @dataclass(frozen=True)
+class L5Offsets:
+    """Active-area offsets, and whether the film keeps one shape.
+
+    Each edge is the ``(lowest, highest)`` dovi_tool reported for it, so an
+    edge that never moves is ``(n, n)`` and one that does is a real range.
+    Keeping both ends is the point: a film that opens 1.85:1 and settles into
+    2.40:1 has no single set of offsets, and answering with either end of the
+    range would be inventing one.
+
+    Measured: `dovi_tool editor` given two active_area presets over a 3000-frame
+    RPU produces `top=0..281, bottom=0..281, left=0, right=0` — plain numbers
+    and ranges on the same line, so the two forms have to be read per field
+    rather than per line.
+    """
+
+    top: tuple[int, int]
+    bottom: tuple[int, int]
+    left: tuple[int, int]
+    right: tuple[int, int]
+
+    @property
+    def variable(self) -> bool:
+        """True when any edge moves through the film."""
+        return any(lo != hi for lo, hi in (self.top, self.bottom, self.left, self.right))
+
+    @property
+    def fixed(self) -> tuple[int, int, int, int] | None:
+        """The one set of offsets, or None when there is no such thing.
+
+        A caller placing bars needs a single answer, and a film that changes
+        shape does not have one. Returning None rather than an end of the range
+        is the same refusal the rest of this package makes elsewhere.
+        """
+        if self.variable:
+            return None
+        return (self.top[0], self.bottom[0], self.left[0], self.right[0])
+
+    def __str__(self) -> str:
+        def edge(value: tuple[int, int]) -> str:
+            lo, hi = value
+            return str(lo) if lo == hi else f"{lo}..{hi}"
+
+        line = (
+            f"top={edge(self.top)}, bottom={edge(self.bottom)}, "
+            f"left={edge(self.left)}, right={edge(self.right)}"
+        )
+        # A reader who does not know `0..281` is a range reads it as one shape,
+        # so the fact travels with the numbers rather than somewhere above them.
+        return f"{line} (varies)" if self.variable else line
+
+
+@dataclass(frozen=True)
 class RpuInfo:
     """Parsed ``dovi_tool info -s`` summary."""
 
@@ -73,7 +136,7 @@ class RpuInfo:
     layer_kind: str | None
     dm_version: str | None
     scene_count: int | None
-    l5_offsets: tuple[int, int, int, int] | None
+    l5_offsets: L5Offsets | None
     raw: str
 
     @property
@@ -98,6 +161,43 @@ class RpuInfo:
         return " · ".join(bits)
 
 
+def _read_l5(text: str) -> L5Offsets | None:
+    """Read the L5 line, or refuse when there is one and it makes no sense.
+
+    Three outcomes, and keeping them apart is the whole point:
+
+    * no such line, or every field ``N/A`` — the RPU carries no level 5, and
+      None says so. `dovi_tool export --levels level5=` on such a file writes an
+      empty table, which is how N/A was confirmed to mean absent rather than
+      unreported. It is what a release already cropped to its own picture looks
+      like, since there are no bars left to mask.
+    * four readable fields — offsets, fixed or variable.
+    * a line that does not parse — raise. The tool said something about the
+      active area and this code did not understand it; answering "no offsets"
+      would be the same confident silence that hid the range form, and the next
+      format change would land in exactly the same place.
+
+    A partly-``N/A`` line has never been observed. If one appears, no edge can
+    be trusted to describe the same frame as the others, so it is declined as a
+    whole rather than half-read.
+    """
+    match = _L5_RE.search(text)
+    if match is None:
+        line = _L5_LINE_RE.search(text)
+        if line is None:
+            return None
+        raise ValueError(
+            f"could not read the L5 offsets line:\n  {line.group(0).strip()}\n"
+            "dovi_tool may have changed its format."
+        )
+
+    fields = match.groups()
+    if any(field == "N/A" for field in fields):
+        return None
+    edges = tuple((int(ends[0]), int(ends[-1])) for ends in (f.split("..") for f in fields))
+    return L5Offsets(top=edges[0], bottom=edges[1], left=edges[2], right=edges[3])
+
+
 def parse_info(text: str) -> RpuInfo:
     """Parse the summary ``dovi_tool info -s`` prints."""
     frames = _FRAMES_RE.search(text)
@@ -106,16 +206,13 @@ def parse_info(text: str) -> RpuInfo:
         raise ValueError(f"could not parse dovi_tool info output:\n{text}")
     scenes = _SCENES_RE.search(text)
     dm = _DM_RE.search(text)
-    l5 = _L5_RE.search(text)
     return RpuInfo(
         frames=int(frames.group(1)),
         profile=int(profile.group(1)),
         layer_kind=profile.group("layer"),
         dm_version=dm.group("dm").strip() if dm else None,
         scene_count=int(scenes.group(1)) if scenes else None,
-        l5_offsets=(
-            (int(l5.group(1)), int(l5.group(2)), int(l5.group(3)), int(l5.group(4))) if l5 else None
-        ),
+        l5_offsets=_read_l5(text),
         raw=text,
     )
 
