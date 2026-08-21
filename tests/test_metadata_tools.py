@@ -117,6 +117,55 @@ Summary:
   L9 MDP: DCI-P3 D65
 """
 
+#: A film whose active area **changes**, which dovi_tool reports as a range on
+#: the fields that move and a plain number on the ones that do not. Every other
+#: sample here holds one shape for its whole runtime, so nothing distinguished a
+#: parser that reads this line from one that silently gives up on it — and
+#: giving up looked exactly like the sample below, which has no L5 at all.
+#:
+#: Built rather than found. Four excerpts were checked for a film that changes
+#: shape — 1917, 2001, Blade Runner 2049, A Clockwork Orange — and each reported
+#: one set of offsets, but that is a statement about four excerpts rather than
+#: about the library: an excerpt from the middle of such a film looks the same,
+#: and no whole-film RPU was extracted. So this is `dovi_tool editor` given two
+#: active_area presets over one real RPU (`prestige.bin`, 3000 frames: 281 for
+#: the first 1500 frames, 0 for the rest) and then `dovi_tool info -s` on the
+#: result. The tool wrote the line, not me.
+DOVI_INFO_VARIABLE_L5 = """\
+Parsing RPU file...
+
+Summary:
+  Frames: 3000
+  Profile: 8
+  DM version: 1 (CM v2.9)
+  Scene/shot count: 27
+  RPU mastering display: 0.0050/4000 nits
+  RPU content light level (L1): MaxCLL: 851.47 nits, MaxFALL: 65.45 nits
+  L6 metadata: Mastering display: 0.0050/4000 nits. MaxCLL: 0 nits, MaxFALL: 0 nits
+  L5 offsets: top=0..281, bottom=0..281, left=0, right=0
+"""
+
+#: A real cropped WEB-DL: 3840x1606, already at its own picture, so there are no
+#: bars to mask and the RPU carries no level 5 at all. `dovi_tool export
+#: --levels level5=` on this file writes an empty table, which is the
+#: independent confirmation that N/A means absent rather than unreported.
+DOVI_INFO_NO_L5 = """\
+Parsing RPU file...
+
+Summary:
+  Frames: 3000
+  Profile: 8
+  DM version: 2 (CM v4.0)
+  Scene/shot count: 28
+  RPU mastering display: 0.0001/1000 nits
+  RPU content light level (L1): MaxCLL: 1000.60 nits, MaxFALL: 19.28 nits
+  L6 metadata: Mastering display: 0.0001/1000 nits. MaxCLL: 0 nits, MaxFALL: 0 nits
+  L5 offsets: top=N/A, bottom=N/A, left=N/A, right=N/A
+  L2 trims: 100 nits, 600 nits, 1000 nits
+  L8 trims: 100 nits, 600 nits
+  L9 MDP: DCI-P3 D65
+"""
+
 
 class TestParseInfo:
     def test_reads_a_profile_7_summary(self) -> None:
@@ -126,7 +175,8 @@ class TestParseInfo:
         assert info.layer_kind == "MEL"
         assert info.is_mel and not info.is_fel
         assert info.scene_count == 4
-        assert info.l5_offsets == (276, 277, 0, 0)
+        assert info.l5_offsets is not None
+        assert info.l5_offsets.fixed == (276, 277, 0, 0)
         assert info.dm_version == "1 (CM v2.9)"
 
     def test_side_offsets_are_not_confused_with_top_and_bottom(self) -> None:
@@ -137,9 +187,10 @@ class TestParseInfo:
         one that read the four numbers in the wrong order.
         """
         info = rpu_mod.parse_info(DOVI_INFO_PILLARBOX)
-        assert info.l5_offsets == (0, 0, 127, 127)
+        assert info.l5_offsets is not None
+        assert info.l5_offsets.fixed == (0, 0, 127, 127)
 
-        top, bottom, left, right = info.l5_offsets
+        top, bottom, left, right = info.l5_offsets.fixed
         assert (3840 - left - right, 2160 - top - bottom) == (3586, 2160)
 
     def test_a_two_version_dm_header_with_sub_lines(self) -> None:
@@ -153,7 +204,97 @@ class TestParseInfo:
         assert info.layer_kind is None
         assert info.dm_version == "1 + 2 (CM 2.9 and 4.0)"
         assert info.scene_count == 4
-        assert info.l5_offsets == (0, 0, 0, 0)
+        assert info.l5_offsets is not None
+        assert info.l5_offsets.fixed == (0, 0, 0, 0)
+
+    def test_a_film_that_changes_shape_is_not_reported_as_having_no_offsets(self) -> None:
+        """The two ways this line stops being four plain numbers, told apart.
+
+        `top=0..281` and `top=N/A` used to arrive at the same place: the regex
+        wanted `(\\d+),` in every field, matched neither, and returned None for
+        both. So an RPU whose active area moves through the film — the case
+        where placing its offsets in another release's frame is least
+        defensible — reported exactly what an RPU with no level 5 at all
+        reports, which is nothing.
+
+        Nothing downstream was wrong: the planner blocks on a resolution
+        mismatch and never reads this field. What was wrong is what the user
+        was shown before deciding.
+        """
+        variable = rpu_mod.parse_info(DOVI_INFO_VARIABLE_L5).l5_offsets
+        absent = rpu_mod.parse_info(DOVI_INFO_NO_L5).l5_offsets
+
+        assert absent is None
+        assert variable is not None
+        assert variable.variable
+        assert variable.top == (0, 281)
+        assert variable.bottom == (0, 281)
+        assert variable.left == (0, 0)
+        assert variable.right == (0, 0)
+
+    def test_a_range_has_no_single_answer_to_give(self) -> None:
+        """`fixed` is the one number an offset has, or None when it has none.
+
+        A caller that wants to place bars needs one set of offsets and must not
+        be handed an end of the range as though it were the answer.
+        """
+        variable = rpu_mod.parse_info(DOVI_INFO_VARIABLE_L5).l5_offsets
+        steady = rpu_mod.parse_info(DOVI_INFO_PILLARBOX).l5_offsets
+        assert variable is not None and steady is not None
+
+        assert variable.fixed is None
+        assert steady.fixed == (0, 0, 127, 127)
+        assert not steady.variable
+
+    def test_a_variable_active_area_says_so_when_printed(self) -> None:
+        """What `hibrit probe` puts in front of the user.
+
+        The offsets and the fact that they move belong on the same line: a
+        reader who sees `0..281` and does not know it is a range reads it as
+        one shape.
+        """
+        variable = rpu_mod.parse_info(DOVI_INFO_VARIABLE_L5).l5_offsets
+        steady = rpu_mod.parse_info(DOVI_INFO_PILLARBOX).l5_offsets
+        assert variable is not None and steady is not None
+
+        assert str(variable) == "top=0..281, bottom=0..281, left=0, right=0 (varies)"
+        assert str(steady) == "top=0, bottom=0, left=127, right=127"
+
+    def test_an_unreadable_l5_line_raises_rather_than_reporting_no_offsets(self) -> None:
+        """A fourth form must not become "no offsets" the way the first two did.
+
+        The sample here is **deliberately invented**, which everything else in
+        this file forbids — and the reason it is allowed is that the subject is
+        not a form dovi_tool prints. It is any form dovi_tool does not print
+        today. Three known shapes are covered by transcripts above; this covers
+        the shape that has not happened yet, and the only honest way to write
+        one of those is to make it up.
+
+        Reporting None here would repeat exactly the bug this file documents:
+        a line the parser could not read, arriving as a confident "there are no
+        offsets". The tool said something; failing to understand it is not the
+        same as it having said nothing.
+        """
+        unknown = DOVI_INFO_P7.replace(
+            "L5 offsets: top=276, bottom=277, left=0, right=0",
+            "L5 offsets: top=0-281, bottom=0-281, left=0, right=0",
+        )
+        assert "top=0-281" in unknown, "the sample did not actually change"
+
+        with pytest.raises(ValueError, match="L5 offsets"):
+            rpu_mod.parse_info(unknown)
+
+    def test_a_summary_without_an_l5_line_at_all_is_not_an_error(self) -> None:
+        """Absent is still absent: only an unreadable line is a failure.
+
+        `dovi_tool` omits the line entirely for some RPUs, and that has always
+        meant "nothing to report". The refusal above must not turn a quiet
+        summary into a crash.
+        """
+        without = "\n".join(line for line in DOVI_INFO_P7.splitlines() if "L5 offsets:" not in line)
+        info = rpu_mod.parse_info(without)
+        assert info.l5_offsets is None
+        assert info.frames == 1000
 
     def test_reads_a_generated_profile_5(self) -> None:
         info = rpu_mod.parse_info(DOVI_INFO_P5)
@@ -186,7 +327,8 @@ class TestParseInfo:
         assert info.layer_kind == "FEL"
         assert info.is_fel and not info.is_mel
         assert info.frames == 400
-        assert info.l5_offsets == (276, 277, 0, 0)
+        assert info.l5_offsets is not None
+        assert info.l5_offsets.fixed == (276, 277, 0, 0)
 
     def test_the_two_profile_7_kinds_are_told_apart(self) -> None:
         mel = rpu_mod.parse_info(DOVI_INFO_P7)

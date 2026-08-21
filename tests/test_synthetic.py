@@ -186,7 +186,8 @@ class TestTheParserAgainstTheTool:
         assert parsed.frames == FRAMES
         assert parsed.profile == 8
         assert parsed.scene_count is not None
-        assert parsed.l5_offsets == (0, 0, 0, 0)
+        assert parsed.l5_offsets is not None
+        assert parsed.l5_offsets.fixed == (0, 0, 0, 0)
         assert parsed.dm_version is not None
 
         # The specific strings the samples are built from.
@@ -194,6 +195,51 @@ class TestTheParserAgainstTheTool:
         assert "Frames:" in raw
         assert "Scene/shot count:" in raw
         assert "L5 offsets:" in raw
+
+    def test_a_moving_active_area_is_still_printed_as_a_range(
+        self, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The range form, confirmed against the tool rather than remembered.
+
+        `top=0..100` is the shape a film that changes aspect ratio produces.
+        No such film was available to copy a transcript from: what was checked
+        is four excerpts — 1917, 2001, Blade Runner 2049 and A Clockwork Orange,
+        2500 to 15000 frames each — and each reported one set of offsets. That
+        is a statement about four excerpts, not about the library, and an
+        excerpt from the middle of a film that changes shape would look exactly
+        the same. No whole-film RPU has been extracted and checked.
+
+        So the form is produced rather than found: two active_area presets over
+        the generated RPU, and dovi_tool writes the line. A sample built by hand
+        would prove only that the hand was consistent; this fails if a future
+        version stops printing ranges.
+
+        It also pins the mixed line: the edges that move print as ranges while
+        left and right stay plain, in one line.
+        """
+        config = {
+            "active_area": {
+                "crop": False,
+                "presets": [
+                    {"id": 0, "left": 0, "right": 0, "top": 0, "bottom": 0},
+                    {"id": 1, "left": 0, "right": 0, "top": 100, "bottom": 100},
+                ],
+                "edits": {f"0-{FRAMES // 2 - 1}": 0, f"{FRAMES // 2}-{FRAMES - 1}": 1},
+            }
+        }
+        edited = DoviTool(toolbox).editor(
+            synthetic_rpu, config, tmp_path / "variable.bin", workdir=tmp_path
+        )
+        raw = toolbox.run("dovi_tool", ["info", "-i", str(edited), "-s"]).stdout
+
+        assert "top=0..100" in raw
+        offsets = parse_info(raw).l5_offsets
+        assert offsets is not None
+        assert offsets.variable
+        assert offsets.top == (0, 100)
+        assert offsets.bottom == (0, 100)
+        assert offsets.left == (0, 0)
+        assert offsets.fixed is None
 
     def test_a_generated_profile_5_reports_profile_5(self, toolbox, tmp_path: Path) -> None:
         config = tmp_path / "gen.json"
@@ -209,7 +255,8 @@ class TestGeneratedMetadata:
         info = DoviTool(toolbox).info(synthetic_rpu)
         assert info.frames == FRAMES
         assert info.profile == 8
-        assert info.l5_offsets == (0, 0, 0, 0)
+        assert info.l5_offsets is not None
+        assert info.l5_offsets.fixed == (0, 0, 0, 0)
 
     def test_the_clip_is_hdr10_and_carries_nothing_else(self, hdr10_clip, toolbox) -> None:
         """The starting point has to be a clean target, or the round-trips
