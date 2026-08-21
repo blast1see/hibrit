@@ -19,6 +19,7 @@ import pytest
 
 from hibrit import hdr10plus as h10p
 from hibrit import rpu as rpu_mod
+from hibrit.tools import UnreadableMismatch
 
 #: `dovi_tool info -s` on the RPU of a real profile 7 remux clip.
 DOVI_INFO_P7 = """\
@@ -381,6 +382,47 @@ class TestMismatchDetection:
         assert "misaligned" in str(error)
         assert "hibrit align" in str(error)
 
+    def test_a_dovi_warning_whose_counts_cannot_be_read_is_not_silence(self) -> None:
+        """The guard must not answer "no mismatch" to a mismatch it saw.
+
+        Both samples here are **deliberately invented**, for the same reason the
+        unreadable L5 line is: the subject is not a wording dovi_tool uses, it
+        is any wording dovi_tool does not use yet. Reordering the two counts is
+        the cheapest example of a change that leaves the warning perfectly
+        legible to a human and invisible to the pattern.
+
+        This matters more than the L5 case. `inject_rpu` has no other defence:
+        if this returns None the file it just wrote is handed back as finished,
+        with metadata misaligned for the whole runtime -- which is the exact
+        failure the project exists to prevent, and the README's claim that
+        hibrit refuses it would be quietly false.
+        """
+        swapped = "Warning: mismatched lengths. RPU 5735, video 173802\n"
+        with pytest.raises(UnreadableMismatch, match="mismatched lengths"):
+            rpu_mod.find_mismatch(swapped)
+
+        wordier = "Warning: mismatched lengths. video 173802 frames, RPU 5735 frames\n"
+        with pytest.raises(UnreadableMismatch):
+            rpu_mod.find_mismatch(wordier)
+
+    def test_an_hdr10plus_warning_whose_counts_cannot_be_read_is_not_silence(self) -> None:
+        """The same hole on the other side, reached by a likelier route.
+
+        hdr10plus_tool's counts are read as "the number after video" and "the
+        last number on the line". A single trailing word defeats the second one,
+        and returning None then says the tool never warned.
+        """
+        trailing_word = "Warning: mismatched lengths. video 240, HDR10+ JSON 150 frames\n"
+        with pytest.raises(UnreadableMismatch):
+            h10p.find_mismatch(trailing_word)
+
+    def test_a_warning_that_reads_cleanly_is_still_just_a_pair(self) -> None:
+        """Refusing the unreadable must not start refusing the readable."""
+        assert rpu_mod.find_mismatch("mismatched lengths. video 1000, RPU 800") == (1000, 800)
+        assert h10p.find_mismatch("mismatched lengths. video 240, HDR10+ JSON 150") == (240, 150)
+        assert rpu_mod.find_mismatch("Rewriting HEVC file...\nDone.") is None
+        assert h10p.find_mismatch("Done.") is None
+
 
 class TestHdr10PlusJson:
     def test_counts_scene_entries(self, tmp_path) -> None:
@@ -477,3 +519,63 @@ class TestInjectGuard:
         tool = h10p.Hdr10PlusTool.__new__(h10p.Hdr10PlusTool)
         tool.box = FakeBox()
         assert tool.inject(tmp_path / "in.hevc", meta, out, video_frames=1000) == out
+
+    def test_an_unreadable_warning_takes_the_written_file_with_it(self, tmp_path) -> None:
+        """Refusing is half the job; the file the tool already wrote is the rest.
+
+        By the time the warning is read, hdr10plus_tool has finished writing.
+        Raising without deleting leaves a misaligned stream on disk that looks
+        exactly like a good one — the state this whole guard exists to avoid,
+        reached by the guard itself.
+
+        The reworded warning is invented on purpose: the point is any wording
+        the patterns do not cover, and a trailing word after the count is enough.
+        """
+        meta = tmp_path / "meta.json"
+        meta.write_text(
+            json.dumps({"SceneInfo": [{"SequenceFrameIndex": i} for i in range(1000)]}),
+            encoding="utf-8",
+        )
+        out = tmp_path / "out.hevc"
+        out.write_bytes(b"a misaligned stream nobody should keep")
+
+        class FakeBox:
+            def run(self, name, args, **kwargs):
+                import subprocess
+
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    "Warning: mismatched lengths. video 1000, HDR10+ JSON 800 frames\n",
+                    "",
+                )
+
+        tool = h10p.Hdr10PlusTool.__new__(h10p.Hdr10PlusTool)
+        tool.box = FakeBox()
+        with pytest.raises(UnreadableMismatch):
+            tool.inject(tmp_path / "in.hevc", meta, out, video_frames=1000)
+        assert not out.exists()
+
+    def test_the_rpu_side_deletes_its_file_too(self, tmp_path) -> None:
+        """The same on the Dolby Vision side, where it matters most.
+
+        Nothing else was watching here: without a frame count to check up front,
+        an unreadable warning was the difference between a refusal and a
+        finished-looking file with every frame's metadata belonging to another.
+        """
+        out = tmp_path / "out.hevc"
+        out.write_bytes(b"a misaligned stream nobody should keep")
+
+        class FakeBox:
+            def run(self, name, args, **kwargs):
+                import subprocess
+
+                return subprocess.CompletedProcess(
+                    args, 0, "Warning: mismatched lengths. RPU 5735, video 173802\n", ""
+                )
+
+        tool = rpu_mod.DoviTool.__new__(rpu_mod.DoviTool)
+        tool.box = FakeBox()
+        with pytest.raises(UnreadableMismatch):
+            tool.inject_rpu(tmp_path / "in.hevc", tmp_path / "rpu.bin", out)
+        assert not out.exists()

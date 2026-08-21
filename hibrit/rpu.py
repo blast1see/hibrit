@@ -26,12 +26,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from hibrit.tools import Toolbox
+from hibrit.tools import Toolbox, UnreadableMismatch
 
 #: Frame-count differences at or below this are padded silently by dovi_tool
 #: and are harmless; anything larger is a misalignment and must be refused.
 DEFAULT_FRAME_TOLERANCE = 3
 
+#: Split in two for the same reason hdr10plus.py is: finding the warning and
+#: reading its numbers are different questions, and only the split lets "a
+#: warning I could not parse" exist as an answer. A single strict pattern
+#: answers None to both a clean run and a reworded warning, and one of those is
+#: a misaligned file.
+_MISMATCH_LINE = re.compile(r"^.*mismatched lengths\..*$", re.IGNORECASE | re.MULTILINE)
 _MISMATCH_RE = re.compile(
     r"mismatched lengths\.\s*video\s+(?P<video>\d+),\s*RPU\s+(?P<rpu>\d+)",
     re.IGNORECASE,
@@ -218,10 +224,18 @@ def parse_info(text: str) -> RpuInfo:
 
 
 def find_mismatch(stderr: str) -> tuple[int, int] | None:
-    """Return ``(video_frames, rpu_frames)`` if dovi_tool warned, else None."""
-    match = _MISMATCH_RE.search(stderr or "")
-    if match is None:
+    """Return ``(video_frames, rpu_frames)`` if dovi_tool warned, else None.
+
+    Raises :class:`UnreadableMismatch` when a warning is there but its counts
+    are not where this expects them. None means dovi_tool said nothing, and
+    nothing else may be allowed to mean that.
+    """
+    line = _MISMATCH_LINE.search(stderr or "")
+    if line is None:
         return None
+    match = _MISMATCH_RE.search(line.group(0))
+    if match is None:
+        raise UnreadableMismatch(line.group(0))
     return int(match.group("video")), int(match.group("rpu"))
 
 
@@ -294,22 +308,48 @@ class DoviTool:
         rpu: Path,
         out: Path,
         *,
+        video_frames: int | None = None,
         frame_tolerance: int = DEFAULT_FRAME_TOLERANCE,
         progress: Callable[[str], None] | None = None,
     ) -> Path:
         """Interleave RPU NAL units into *video*.
 
-        Raises :class:`FrameCountMismatch` when dovi_tool reports a length
-        mismatch larger than *frame_tolerance*, and deletes the file it wrote —
-        a misaligned output is worse than no output, because it looks correct.
+        Raises :class:`FrameCountMismatch` when the lengths disagree by more
+        than *frame_tolerance*, and deletes the file it wrote — a misaligned
+        output is worse than no output, because it looks correct.
+
+        When *video_frames* is known the counts are compared before dovi_tool
+        runs, which is both faster and sturdier. Faster because a doomed job
+        fails in a second instead of after rewriting 68 GB. Sturdier because
+        the check afterwards is a regex over the warning dovi_tool prints, and
+        a reworded warning would leave nothing behind it: this was the only
+        guard on the Dolby Vision side, while the HDR10+ side had checked up
+        front all along.
         """
+        if video_frames is not None:
+            # Reading the count costs a `dovi_tool info` on a file of a few
+            # megabytes: measured at 0.06s for a 15,000-frame RPU, against the
+            # twenty minutes the injection it guards would otherwise spend.
+            # The pipeline has this figure already, but taking it again keeps
+            # the guard inside the method that writes the file.
+            rpu_frames = self.info(rpu).frames
+            if abs(rpu_frames - video_frames) > frame_tolerance:
+                raise FrameCountMismatch(video_frames, rpu_frames)
+
         proc = self.box.run(
             "dovi_tool",
             ["inject-rpu", "-i", str(video), "--rpu-in", str(rpu), "-o", str(out)],
             on_output=progress,
         )
         combined = f"{proc.stdout}\n{proc.stderr}"
-        mismatch = find_mismatch(combined)
+        try:
+            mismatch = find_mismatch(combined)
+        except UnreadableMismatch:
+            # The refusal is only half of it: dovi_tool has already written the
+            # file, and leaving 68 GB of misaligned output behind for someone to
+            # find later is the thing this method exists to prevent.
+            out.unlink(missing_ok=True)
+            raise
         if mismatch is not None:
             video_frames, rpu_frames = mismatch
             if abs(rpu_frames - video_frames) > frame_tolerance:

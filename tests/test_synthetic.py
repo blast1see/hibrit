@@ -347,6 +347,40 @@ class TestRefusals:
         assert caught.value.delta == -100
         assert not out.exists()
 
+    def test_a_known_frame_count_refuses_before_dovi_tool_runs(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The guard must not depend on reading dovi_tool's warning.
+
+        Until this existed, `inject_rpu` had exactly one defence against a
+        misaligned RPU: a regex over the warning dovi_tool prints before exiting
+        0. Reword that warning and the guard disappears silently — while
+        `Hdr10PlusTool.inject` had checked the counts up front all along. This
+        is the same check on the other side.
+
+        It is also the difference between failing in a second and failing after
+        rewriting 68 GB, so the assertion is that the output was never begun.
+        """
+        dovi = DoviTool(toolbox)
+        short = dovi.editor(
+            synthetic_rpu, {"remove": ["0-99"]}, tmp_path / "short.bin", workdir=tmp_path
+        )
+
+        out = tmp_path / "never.hevc"
+        with pytest.raises(FrameCountMismatch) as caught:
+            dovi.inject_rpu(hdr10_clip, short, out, video_frames=FRAMES)
+        assert caught.value.delta == -100
+        assert not out.exists()
+
+    def test_a_known_frame_count_still_allows_a_matching_pair(
+        self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
+    ) -> None:
+        """The new pre-check must not refuse the ordinary case."""
+        out = DoviTool(toolbox).inject_rpu(
+            hdr10_clip, synthetic_rpu, tmp_path / "fine.hevc", video_frames=FRAMES
+        )
+        assert out.exists() and out.stat().st_size > 0
+
     def test_a_long_rpu_is_refused_too(
         self, hdr10_clip, synthetic_rpu, toolbox, tmp_path: Path
     ) -> None:

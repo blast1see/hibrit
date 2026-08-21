@@ -391,7 +391,13 @@ def _execute(
 
     if rpu is not None:
         say("injecting Dolby Vision RPU")
-        injected = dovi.inject_rpu(current, rpu, workdir / "with_dv.hevc", progress=tool_output)
+        injected = dovi.inject_rpu(
+            current,
+            rpu,
+            workdir / "with_dv.hevc",
+            video_frames=target.frame_count,
+            progress=tool_output,
+        )
         if current is not target_stream and not keep_intermediates:
             current.unlink(missing_ok=True)
         current = injected
