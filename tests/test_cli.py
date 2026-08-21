@@ -71,6 +71,25 @@ class TestExitCodes:
         assert code == 2
         assert "hibrit doctor" in capsys.readouterr().err
 
+    def test_output_this_code_cannot_parse_is_a_sentence_too(self, capsys, monkeypatch) -> None:
+        """`parse_info` refuses with ValueError, and a refusal must not be a traceback.
+
+        The OSError handler beside this one says as much in its own comment —
+        "still a sentence, not a traceback" — but ValueError is not a
+        RuntimeError and fell straight through. Survivable while the only route
+        there was output missing its Frames line; widening the L5 parser to
+        refuse a line it cannot read makes a future dovi_tool release a likelier
+        way to reach it, and a stack trace is a poor way to learn that the tool
+        changed its wording.
+        """
+
+        def explode(_args):
+            raise ValueError("could not read the L5 offsets line:\n  L5 offsets: top=?")
+
+        monkeypatch.setattr(cli, "cmd_probe", explode)
+        assert cli.main(["probe", "a.mkv"]) == 2
+        assert "could not read the L5 offsets line" in capsys.readouterr().err
+
     def test_interrupt_says_nothing_further_was_written(self, capsys, monkeypatch) -> None:
         def explode(_args):
             raise KeyboardInterrupt
