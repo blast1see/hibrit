@@ -78,6 +78,17 @@ would be misaligned for the whole runtime. Align the RPU first (hibrit align),
 then inject.
 ```
 
+That refusal used to rest entirely on reading the warning above, which means it
+rested on both tools keeping their present wording. They are under active
+development, and a pattern that finds nothing looks exactly like a clean run —
+so the day either sentence changed, the guard would have switched itself off
+without saying so, and the paragraph you are reading would have quietly become
+false.
+
+It no longer rests there. The counts are compared before either tool starts, and
+a warning that *is* found but cannot be parsed is itself a refusal rather than a
+shrug: the tool said the lengths disagree, which is all hibrit needs to stop.
+
 ## Frame alignment
 
 Finding the offset is the part that is actually hard, so it is the part with

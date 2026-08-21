@@ -385,7 +385,10 @@ def main(argv: list[str] | None = None) -> int:
     except MissingTool as error:
         print(f"error: {error}\n\nRun 'hibrit doctor' to see what is missing.", file=sys.stderr)
         return 2
-    except (ToolFailed, RuntimeError) as error:
+    except (ToolFailed, RuntimeError, ValueError) as error:
+        # ValueError is how the parsers refuse output they cannot read. That is
+        # a refusal like any other here and belongs in a sentence rather than a
+        # stack trace, so it comes in by the same door.
         print(f"error: {error}", file=sys.stderr)
         return 2
     except OSError as error:

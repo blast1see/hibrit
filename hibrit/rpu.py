@@ -87,14 +87,15 @@ class L5Offsets:
 
     Each edge is the ``(lowest, highest)`` dovi_tool reported for it, so an
     edge that never moves is ``(n, n)`` and one that does is a real range.
-    Keeping both ends is the point: a film that opens 1.85:1 and settles into
-    2.40:1 has no single set of offsets, and answering with either end of the
-    range would be inventing one.
+    Keeping both ends is the point: a film with IMAX sequences has no single set
+    of offsets, and answering with either end of the range would be inventing
+    one.
 
-    Measured: `dovi_tool editor` given two active_area presets over a 3000-frame
-    RPU produces `top=0..281, bottom=0..281, left=0, right=0` — plain numbers
-    and ranges on the same line, so the two forms have to be read per field
-    rather than per line.
+    Measured on a UHD remux of The Dark Knight, whose whole RPU reports
+    `L5 offsets: top=0..280, bottom=0..280, left=0, right=0` — 179,353 frames
+    masked to 2.40:1 against 39,602 left open at 1.78:1. Note that the sides
+    stay plain while the moving edges print as ranges, in one line, which is why
+    the two forms are read per field rather than per line.
     """
 
     top: tuple[int, int]
@@ -351,10 +352,13 @@ class DoviTool:
             out.unlink(missing_ok=True)
             raise
         if mismatch is not None:
-            video_frames, rpu_frames = mismatch
-            if abs(rpu_frames - video_frames) > frame_tolerance:
+            # Named apart from the *video_frames* parameter rather than shadowing
+            # it: these are the counts dovi_tool reported, which is a different
+            # fact from the count the caller supplied, and the two now coexist.
+            found_video, found_rpu = mismatch
+            if abs(found_rpu - found_video) > frame_tolerance:
                 out.unlink(missing_ok=True)
-                raise FrameCountMismatch(video_frames, rpu_frames)
+                raise FrameCountMismatch(found_video, found_rpu)
         return out
 
     def remove(self, source: Path, out: Path) -> Path:
