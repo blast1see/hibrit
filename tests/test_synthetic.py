@@ -202,17 +202,20 @@ class TestTheParserAgainstTheTool:
         """The range form, confirmed against the tool rather than remembered.
 
         `top=0..100` is the shape a film that changes aspect ratio produces.
-        No such film was available to copy a transcript from: what was checked
-        is four excerpts — 1917, 2001, Blade Runner 2049 and A Clockwork Orange,
-        2500 to 15000 frames each — and each reported one set of offsets. That
-        is a statement about four excerpts, not about the library, and an
-        excerpt from the middle of a film that changes shape would look exactly
-        the same. No whole-film RPU has been extracted and checked.
+        Such films are ordinary: sampling real remuxes at several points found
+        The Dark Knight moving between 0 and 280, Oppenheimer between 207 and 0,
+        and Guardians of the Galaxy Vol. 3 between 68 and 276 — every one an
+        IMAX sequence opening the frame up and closing it again. An earlier
+        version of this comment said no such film was on hand, which was a
+        statement about four excerpts that had been looked at rather than about
+        the library.
 
-        So the form is produced rather than found: two active_area presets over
-        the generated RPU, and dovi_tool writes the line. A sample built by hand
-        would prove only that the hand was consistent; this fails if a future
-        version stops printing ranges.
+        The form is still produced here rather than copied, because this tier
+        runs in CI where no film exists: two active_area presets over the
+        generated RPU, and dovi_tool writes the line. The transcript taken from
+        a real one lives in test_metadata_tools.py. A sample built by hand would
+        prove only that the hand was consistent; this fails if a future version
+        stops printing ranges.
 
         It also pins the mixed line: the edges that move print as ranges while
         left and right stay plain, in one line.

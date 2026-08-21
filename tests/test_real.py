@@ -12,10 +12,20 @@ directory holding them:
 ``align_a.mkv``       the profile 8.1 clip in Matroska
 ``align_b.mkv``       a re-encode of ``align_a`` starting at frame 137
 ``align_other.mkv``   the profile 7 clip in Matroska — a different film
+``variable_l5.mkv``   a clip straddling an aspect-ratio change, so one RPU
+                      carries two different sets of level 5 offsets
 
-Those five are the whole list. Everything else these tests need they build,
+Those six are the whole list. Everything else these tests need they build,
 because a suite that leans on whatever is left lying in the media directory
 breaks the day somebody tidies it up.
+
+The last one cannot be synthesised the way the others can. ``dovi_tool editor``
+writes a moving active area on request and the tools tier uses that, but a
+made-to-order RPU only proves the tool round-trips what it was told. This clip
+is cut from a UHD remux of a film whose IMAX sequences open the frame from
+2.40:1 to 1.78:1 and close it again: 12 seconds spanning the first change, which
+in that release falls at frame 1274. Across the whole film the split is 179,353
+frames of scope against 39,602 of IMAX.
 
 The clips are cut with ``ffmpeg -c copy``, which preserves the metadata NAL
 units exactly, so a second of real footage tests the same code path a
@@ -101,6 +111,56 @@ class TestRoundTrip:
         assert after.scene_count == before.scene_count
         assert after.dm_version == before.dm_version
         assert after.l5_offsets == before.l5_offsets
+
+
+class TestVariableActiveArea:
+    def test_a_films_own_aspect_ratio_change_is_read_as_a_range(
+        self, media: Path, toolbox, tmp_path: Path
+    ) -> None:
+        """Read off a real film rather than an RPU built to order.
+
+        Everything else that exercises this path either holds one shape or was
+        edited into changing one. This clip changes because the film does, and
+        the numbers are the release's own: 280 rows masked top and bottom for
+        2.40:1, none at all for the IMAX frames.
+
+        The old parser reported None here — the same answer it gives for a
+        release with no level 5 whatsoever — which is what this is here to stop
+        coming back.
+        """
+        source = _need(media, "variable_l5.mkv")
+        info = DoviTool(toolbox).info(
+            DoviTool(toolbox).extract_rpu(source, tmp_path / "variable.bin")
+        )
+
+        assert info.l5_offsets is not None
+        assert info.l5_offsets.variable
+        assert info.l5_offsets.fixed is None
+        assert info.l5_offsets.top == (0, 280)
+        assert info.l5_offsets.bottom == (0, 280)
+        # The sides never move: a scope film masks rows, not columns.
+        assert info.l5_offsets.left == (0, 0)
+        assert info.l5_offsets.right == (0, 0)
+        assert "(varies)" in str(info.l5_offsets)
+
+    def test_the_clip_really_does_hold_both_shapes(
+        self, media: Path, toolbox, tmp_path: Path
+    ) -> None:
+        """Confirm the material, not just the parse.
+
+        A clip that had been trimmed down to one shape would make the test above
+        pass for the wrong reason — or rather fail, but the day it was replaced
+        with a shorter cut nobody would know why. So the per-frame table is read
+        directly, by a route parse_info has no part in.
+        """
+        source = _need(media, "variable_l5.mkv")
+        dovi = DoviTool(toolbox)
+        rpu = dovi.extract_rpu(source, tmp_path / "variable.bin")
+        csv = dovi.export_levels(rpu, tmp_path / "l5.csv", level="level5")
+
+        rows = csv.read_text(encoding="utf-8").splitlines()[1:]
+        shapes = {tuple(row.split(",")[1:]) for row in rows if row.strip()}
+        assert len(shapes) == 2, f"expected two active areas in the clip, got {shapes}"
 
 
 class TestSilentPaddingIsCaught:

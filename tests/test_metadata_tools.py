@@ -124,26 +124,30 @@ Summary:
 #: parser that reads this line from one that silently gives up on it — and
 #: giving up looked exactly like the sample below, which has no L5 at all.
 #:
-#: Built rather than found. Four excerpts were checked for a film that changes
-#: shape — 1917, 2001, Blade Runner 2049, A Clockwork Orange — and each reported
-#: one set of offsets, but that is a statement about four excerpts rather than
-#: about the library: an excerpt from the middle of such a film looks the same,
-#: and no whole-film RPU was extracted. So this is `dovi_tool editor` given two
-#: active_area presets over one real RPU (`prestige.bin`, 3000 frames: 281 for
-#: the first 1500 frames, 0 for the rest) and then `dovi_tool info -s` on the
-#: result. The tool wrote the line, not me.
+#: The whole RPU of a real UHD remux of The Dark Knight, whose IMAX sequences
+#: open the frame from 2.40:1 to 1.78:1 and close it again. Exporting its level 5
+#: table gives the two shapes and how much of the film each holds:
+#:
+#:     179,353 frames  left=0 right=0 top=280 bottom=280   scope
+#:      39,602 frames  left=0 right=0 top=0   bottom=0     IMAX
+#:
+#: with the first change at frame 1274 and dozens more after it. Films like this
+#: are ordinary rather than exotic — sampling found Oppenheimer moving between
+#: 207 and 0 and Guardians of the Galaxy Vol. 3 between 68 and 276 — which is
+#: what makes the old behaviour worth a test: this line used to parse as though
+#: the film carried no level 5 at all, exactly like the cropped WEB-DL below.
 DOVI_INFO_VARIABLE_L5 = """\
 Parsing RPU file...
 
 Summary:
-  Frames: 3000
+  Frames: 218955
   Profile: 8
   DM version: 1 (CM v2.9)
-  Scene/shot count: 27
+  Scene/shot count: 2795
   RPU mastering display: 0.0050/4000 nits
-  RPU content light level (L1): MaxCLL: 851.47 nits, MaxFALL: 65.45 nits
-  L6 metadata: Mastering display: 0.0050/4000 nits. MaxCLL: 0 nits, MaxFALL: 0 nits
-  L5 offsets: top=0..281, bottom=0..281, left=0, right=0
+  RPU content light level (L1): MaxCLL: 1111.66 nits, MaxFALL: 312.28 nits
+  L6 metadata: Mastering display: 0.0050/4000 nits. MaxCLL: 1111 nits, MaxFALL: 312 nits
+  L5 offsets: top=0..280, bottom=0..280, left=0, right=0
 """
 
 #: A real cropped WEB-DL: 3840x1606, already at its own picture, so there are no
@@ -211,7 +215,7 @@ class TestParseInfo:
     def test_a_film_that_changes_shape_is_not_reported_as_having_no_offsets(self) -> None:
         """The two ways this line stops being four plain numbers, told apart.
 
-        `top=0..281` and `top=N/A` used to arrive at the same place: the regex
+        `top=0..280` and `top=N/A` used to arrive at the same place: the regex
         wanted `(\\d+),` in every field, matched neither, and returned None for
         both. So an RPU whose active area moves through the film — the case
         where placing its offsets in another release's frame is least
@@ -228,8 +232,8 @@ class TestParseInfo:
         assert absent is None
         assert variable is not None
         assert variable.variable
-        assert variable.top == (0, 281)
-        assert variable.bottom == (0, 281)
+        assert variable.top == (0, 280)
+        assert variable.bottom == (0, 280)
         assert variable.left == (0, 0)
         assert variable.right == (0, 0)
 
@@ -251,14 +255,14 @@ class TestParseInfo:
         """What `hibrit probe` puts in front of the user.
 
         The offsets and the fact that they move belong on the same line: a
-        reader who sees `0..281` and does not know it is a range reads it as
+        reader who sees `0..280` and does not know it is a range reads it as
         one shape.
         """
         variable = rpu_mod.parse_info(DOVI_INFO_VARIABLE_L5).l5_offsets
         steady = rpu_mod.parse_info(DOVI_INFO_PILLARBOX).l5_offsets
         assert variable is not None and steady is not None
 
-        assert str(variable) == "top=0..281, bottom=0..281, left=0, right=0 (varies)"
+        assert str(variable) == "top=0..280, bottom=0..280, left=0, right=0 (varies)"
         assert str(steady) == "top=0, bottom=0, left=127, right=127"
 
     def test_an_unreadable_l5_line_raises_rather_than_reporting_no_offsets(self) -> None:
