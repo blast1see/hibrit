@@ -84,6 +84,22 @@ class TestPackagedVersion:
         changelog = release_notes.CHANGELOG.read_text(encoding="utf-8")
         assert release_notes.section_for(version, changelog)
 
+    def test_the_two_places_that_state_a_version_agree(self) -> None:
+        """`pyproject.toml` and `hibrit/__init__.py` both name it; nothing checked.
+
+        Every release means editing two files, and the failure mode of editing
+        one is a build whose `--version` disagrees with the wheel it came from —
+        the same class of quiet inconsistency the changelog check above exists
+        to catch, on the one axis that had nothing watching it.
+        """
+        import re
+        from pathlib import Path
+
+        pyproject = (Path(release_notes.ROOT) / "pyproject.toml").read_text(encoding="utf-8")
+        declared = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
+        assert declared is not None, "pyproject.toml does not declare a version"
+        assert declared.group(1) == release_notes.packaged_version()
+
 
 class TestThePackagedLayout:
     """What the reader finds after unzipping is part of the product.
