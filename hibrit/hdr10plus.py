@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from hibrit.tools import Toolbox
+from hibrit.tools import Toolbox, UnreadableMismatch
 
 DEFAULT_FRAME_TOLERANCE = 3
 
@@ -74,7 +74,14 @@ def read_json(path: Path) -> Hdr10PlusInfo:
 
 
 def find_mismatch(stderr: str) -> tuple[int, int] | None:
-    """Return ``(video_frames, metadata_frames)`` if the tool warned, else None."""
+    """Return ``(video_frames, metadata_frames)`` if the tool warned, else None.
+
+    Raises :class:`UnreadableMismatch` when the warning is there and its counts
+    are not. This used to return None, which reported a mismatch the tool had
+    just announced as no mismatch at all — and a single trailing word after the
+    metadata count is enough to reach it, since that count is read as the last
+    number on the line.
+    """
     line = _MISMATCH_LINE.search(stderr or "")
     if line is None:
         return None
@@ -82,7 +89,7 @@ def find_mismatch(stderr: str) -> tuple[int, int] | None:
     video = _VIDEO_COUNT.search(text)
     meta = _TRAILING_COUNT.search(text.rstrip())
     if video is None or meta is None:
-        return None
+        raise UnreadableMismatch(text)
     return int(video.group(1)), int(meta.group(1))
 
 
@@ -147,7 +154,11 @@ class Hdr10PlusTool:
             ["inject", "-i", str(video), "-j", str(metadata), "-o", str(out)],
             on_output=progress,
         )
-        mismatch = find_mismatch(f"{proc.stdout}\n{proc.stderr}")
+        try:
+            mismatch = find_mismatch(f"{proc.stdout}\n{proc.stderr}")
+        except UnreadableMismatch:
+            out.unlink(missing_ok=True)
+            raise
         if mismatch is not None:
             found_video, found_meta = mismatch
             if abs(found_meta - found_video) > frame_tolerance:

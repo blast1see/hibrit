@@ -66,6 +66,29 @@ class MissingTool(RuntimeError):
         self.name = name
 
 
+class UnreadableMismatch(RuntimeError):
+    """Raised when a tool warns about mismatched lengths in words we cannot read.
+
+    Both metadata tools announce a length mismatch, exit 0, and write a finished
+    file; hibrit's refusal depends entirely on reading that announcement. If the
+    wording moves, a pattern that reports "nothing found" turns the guard off
+    without saying so, and the misaligned file ships looking finished.
+
+    So the two states are kept apart. No warning is silence, and means the
+    injection was clean. A warning nobody could parse is a refusal: the tool
+    said the lengths disagree, which is all that needs to be known to stop.
+    """
+
+    def __init__(self, line: str) -> None:
+        super().__init__(
+            "the tool warned about mismatched lengths but the counts could not be "
+            f"read from it:\n  {line.strip()}\n"
+            "Refusing the output rather than assuming it is aligned; the tool's "
+            "wording may have changed."
+        )
+        self.line = line
+
+
 class ToolFailed(RuntimeError):
     """Raised when an external binary exits non-zero."""
 
