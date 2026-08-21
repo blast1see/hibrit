@@ -12,7 +12,7 @@ directory holding them:
 ``align_a.mkv``       the profile 8.1 clip in Matroska
 ``align_b.mkv``       a re-encode of ``align_a`` starting at frame 137
 ``align_other.mkv``   the profile 7 clip in Matroska — a different film
-``variable_l5.mkv``   a clip straddling an aspect-ratio change, so one RPU
+``variable_l5.hevc``  a clip straddling an aspect-ratio change, so one RPU
                       carries two different sets of level 5 offsets
 
 Those six are the whole list. Everything else these tests need they build,
@@ -26,6 +26,13 @@ is cut from a UHD remux of a film whose IMAX sequences open the frame from
 2.40:1 to 1.78:1 and close it again: 12 seconds spanning the first change, which
 in that release falls at frame 1274. Across the whole film the split is 179,353
 frames of scope against 39,602 of IMAX.
+
+It is a raw stream rather than Matroska on purpose. Cutting Matroska to Matroska
+with ``-c copy`` leaves a container MediaInfo cannot make sense of: the first
+attempt at this clip reported 17,382 FPS and the source film's whole frame count
+for twelve seconds of footage, and `-avoid_negative_ts` did not help. An Annex B
+stream carries no container timing to get wrong, and MediaInfo reads 23.976 off
+it — which is why the two clips that had to be exact were always ``.hevc``.
 
 The clips are cut with ``ffmpeg -c copy``, which preserves the metadata NAL
 units exactly, so a second of real footage tests the same code path a
@@ -128,7 +135,7 @@ class TestVariableActiveArea:
         release with no level 5 whatsoever — which is what this is here to stop
         coming back.
         """
-        source = _need(media, "variable_l5.mkv")
+        source = _need(media, "variable_l5.hevc")
         info = DoviTool(toolbox).info(
             DoviTool(toolbox).extract_rpu(source, tmp_path / "variable.bin")
         )
@@ -153,7 +160,7 @@ class TestVariableActiveArea:
         with a shorter cut nobody would know why. So the per-frame table is read
         directly, by a route parse_info has no part in.
         """
-        source = _need(media, "variable_l5.mkv")
+        source = _need(media, "variable_l5.hevc")
         dovi = DoviTool(toolbox)
         rpu = dovi.extract_rpu(source, tmp_path / "variable.bin")
         csv = dovi.export_levels(rpu, tmp_path / "l5.csv", level="level5")

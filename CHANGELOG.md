@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.1.4
+
+Two guards were reporting "nothing to see" when what they meant was "I could not
+read this". Both are fixed, and the second one mattered.
+
+### The L5 offsets line has three forms, and only one was read
+
+`dovi_tool info -s` describes a film's active area three ways:
+
+```
+L5 offsets: top=281, ...      one shape for the whole film
+L5 offsets: top=0..281, ...   a shape that changes through it
+L5 offsets: top=N/A, ...      no level 5 in the RPU at all
+```
+
+The pattern wanted plain digits in every field, so it matched the first and
+answered `None` to the other two -- the same answer, for opposite situations. A
+film whose active area moves is the case where placing its offsets in another
+release's frame is least defensible, and it was the case that showed nothing.
+
+Films like that are ordinary. Sampling real remuxes found The Dark Knight moving
+between 0 and 280, Oppenheimer between 207 and 0, and Guardians of the Galaxy
+Vol. 3 between 68 and 276 -- IMAX sequences opening the frame and closing it
+again. Two others, Interstellar and Mission: Impossible - Fallout, carry no
+level 5 at all, which until now rested on a single cropped WEB-DL.
+
+No output file was ever affected: the planner blocks on a resolution mismatch
+and never reads this field. What was affected is what you were told before
+deciding, and the note above a `hibrit plot -o` figure, which vanished for such
+a film and now reads `top=0..280, bottom=0..280, left=0, right=0 (varies)`.
+
+`l5_offsets` is now an `L5Offsets` holding each edge as a range. `.fixed` gives
+the one set of offsets, or `None` when the film has no single answer, rather
+than handing back an end of the range as though it were one.
+
+### The length guards no longer fail open
+
+Both metadata tools announce a length mismatch, exit 0, and write a finished
+file. hibrit's refusal was a pattern matched against that announcement -- so a
+reworded warning would have switched the guard off silently and shipped the
+misaligned file, while the README went on claiming otherwise.
+
+`Hdr10PlusTool.inject` answered `None` -- "no mismatch" -- when it found the
+warning but could not read the counts off it, which one trailing word after the
+number is enough to cause. `DoviTool.inject_rpu` could not represent that state
+at all, and had nothing else: the HDR10+ side had checked the counts up front
+since it was written, and the Dolby Vision side never did.
+
+Now the counts are compared before either tool starts, and a warning that is
+found but cannot be parsed is itself a refusal. Both callers delete the file the
+tool already wrote before raising, since raising without deleting leaves exactly
+the artefact the guard exists to prevent.
+
+### Smaller
+
+A parser refusing output it cannot read raised `ValueError`, which `main` did
+not catch, so the refusal arrived as a stack trace. It is a sentence now, like
+every other error here.
+
+`pyproject.toml` and `hibrit/__init__.py` both state the version and nothing
+compared them. A test does.
+
 ## 0.1.3
 
 `hibrit plot -o` told the packaged build's user to `pip install`, which is
