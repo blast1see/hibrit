@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Alignment counted frames ffmpeg made up
+
+`align` measures the offset in coded frames, because that is how the metadata
+it retimes is indexed. The curve it correlates was read through ffmpeg's
+default output mode, which fits a rawvideo output to a constant frame rate and
+duplicates or drops frames wherever the container's timing disagrees -- saying
+so only in a `dup=` counter nobody reads.
+
+On a whole film this produced a wrong answer that looked like a good one. An
+online WEB-DL whose Matroska blocks give about one frame in 93 a duration of
+83 ms instead of 42 came back with a single frame duplicated among its opening
+black frames, and `align` reported an offset of **+1** against a release it
+matched frame for frame: confidence 13.45, both windows agreeing, verdict
+`reliable`. `hibrit run` would have retimed the metadata by one frame for the
+entire runtime, and every verification check would have passed, because each
+of them measures that the metadata arrived intact, not that it landed on the
+right frame.
+
+The curve is now read with `-fps_mode passthrough`: one value per coded frame,
+whatever the container says about timing. On the same pair `align` now reports
+**+0**.
+
+It was caught by the metadata rather than the picture. The two releases' own
+scene boundaries -- the RPU's `scene_refresh_flag` and the HDR10+ scene
+changes -- coincided at an offset of 0 in 97.3% of scenes and at either
+neighbour in under 1%. Comparing them involves no decoding at all, so it could
+not be fooled the same way.
+
+Two tests pin it down. The `tools` tier builds a 48-frame clip with a gap in
+its timestamps; read the old way it comes back 49 frames long with a repeat at
+index 21. The `real` tier gains a seventh clip, `irregular_durations.mkv`, the
+release sample of the WEB-DL above: 1,397 frames the old way, 1,396 now.
+
 ## 0.1.4
 
 Two guards were reporting "nothing to see" when what they meant was "I could not

@@ -18,8 +18,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from hibrit.align import luma_curve
 from hibrit.hdr10plus import Hdr10PlusMismatch, Hdr10PlusTool, read_json
 from hibrit.matroska import extract_video, remux
 from hibrit.probe import probe
@@ -1412,3 +1414,72 @@ class TestVerificationCosts:
             "the extraction did not happen — if this is now free, SPACE_FACTOR "
             "and the comment on it can both be revisited"
         )
+
+
+class TestTheCurveFollowsCodedFrames:
+    """``align`` has to count in coded frames, because that is how the metadata
+    it retimes is indexed: one RPU, one HDR10+ payload per coded frame.
+
+    ffmpeg's default output mode counts in something else. It fits a rawvideo
+    output to a constant rate and duplicates or drops frames wherever the
+    container's timing disagrees, reporting it only in a counter. A real WEB-DL
+    whose Matroska blocks carried irregular durations came back from the curve
+    with one frame duplicated, and ``align`` called a +1 offset reliable against
+    a release it matched frame for frame.
+
+    A gap in the timestamps is the simplest way to give the default mode
+    something to fill, and it needs nothing but ffmpeg. MediaInfo is no help
+    as the referee here: it derives the count from the duration and reports 49
+    for this clip, which is why the expected number is the one the clip was
+    built with.
+    """
+
+    CODED = 48
+    GAP_AFTER = 20
+
+    @pytest.fixture(scope="class")
+    def gapped_clip(self, synthetic_dir: Path, toolbox) -> Path:
+        out = synthetic_dir / "gapped.mkv"
+        toolbox.run(
+            "ffmpeg",
+            [
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc2=size={WIDTH}x{HEIGHT}:rate={FPS}",
+                "-frames:v",
+                str(self.CODED),
+                # Every frame from GAP_AFTER on is stamped one frame later than
+                # its position, leaving one empty slot in the timeline.
+                "-vf",
+                f"setpts='if(gte(N,{self.GAP_AFTER}),N+1,N)/({FPS}*TB)'",
+                "-fps_mode",
+                "passthrough",
+                "-c:v",
+                "libx265",
+                "-pix_fmt",
+                "yuv420p10le",
+                "-preset",
+                "ultrafast",
+                "-x265-params",
+                "log-level=none",
+                str(out),
+            ],
+        )
+        return out
+
+    def test_one_value_per_coded_frame(self, gapped_clip: Path, toolbox) -> None:
+        curve = luma_curve(probe(gapped_clip, toolbox), toolbox)
+        assert len(curve) == self.CODED
+
+    def test_no_frame_is_invented_to_fill_the_gap(self, gapped_clip: Path, toolbox) -> None:
+        """testsrc2 changes every frame, so an exact repeat can only be a
+        duplicate ffmpeg made up. Without the flag it lands at index 21, right
+        after the gap."""
+        curve = luma_curve(probe(gapped_clip, toolbox), toolbox)
+        repeats = np.flatnonzero(np.diff(curve) == 0) + 1
+        assert repeats.size == 0, f"frame(s) {repeats.tolist()} repeat the one before"

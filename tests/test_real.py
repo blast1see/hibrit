@@ -14,8 +14,11 @@ directory holding them:
 ``align_other.mkv``   the profile 7 clip in Matroska — a different film
 ``variable_l5.hevc``  a clip straddling an aspect-ratio change, so one RPU
                       carries two different sets of level 5 offsets
+``irregular_durations.mkv``  a release sample of an online WEB-DL whose
+                      Matroska blocks give 36 of its 1,396 frames a duration
+                      of 83 ms instead of 42
 
-Those six are the whole list. Everything else these tests need they build,
+Those seven are the whole list. Everything else these tests need they build,
 because a suite that leans on whatever is left lying in the media directory
 breaks the day somebody tidies it up.
 
@@ -255,6 +258,21 @@ class TestAlignmentOnRealFootage:
         for start in (1, 7, 40, 137, 200, 401):
             seeked = luma_curve(info, toolbox, start_frame=start, frames=120)
             assert np.allclose(seeked[:120], whole[start : start + 120]), f"start={start}"
+
+    def test_irregular_block_durations_do_not_add_a_frame(self, media: Path, toolbox) -> None:
+        """The clip that found the bug, as it came.
+
+        It has to stay Matroska: the durations that trip ffmpeg's default output
+        mode live in the container, and a raw stream has none. Read without
+        ``-fps_mode passthrough`` it comes back 1,397 frames long, one frame
+        duplicated among the black ones it opens with -- invisible here, and on
+        the whole film it was an offset of +1 that ``align`` called reliable.
+        Here MediaInfo's count can be the referee, because the release sample
+        carries no gap and its count agrees with the coded one.
+        """
+        info = probe(_need(media, "irregular_durations.mkv"), toolbox)
+        assert info.frame_count == 1396
+        assert len(luma_curve(info, toolbox)) == info.frame_count
 
     def test_a_window_that_reads_nothing_is_reported_as_such(self, media: Path, toolbox) -> None:
         """A short window over a quiet stretch measures nothing, and saying the

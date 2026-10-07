@@ -215,6 +215,24 @@ def luma_curve(
 ) -> np.ndarray:
     """Mean luma per frame, as a 1-D float array.
 
+    One value per *coded* frame, in order. The metadata this curve is used to
+    align is indexed the same way -- one RPU, one HDR10+ payload per coded
+    frame -- so anything else measures the offset of something that does not
+    exist.
+
+    That is why ``-fps_mode passthrough`` is passed. By default ffmpeg fits a
+    rawvideo output to a constant frame rate, duplicating or dropping frames
+    wherever the container's timing disagrees with that rate, and says so only
+    in a counter nobody reads. A frame count stays plausible and the curve is
+    simply shifted from that point on. Measured on a whole film: an online
+    WEB-DL whose Matroska blocks give about one frame in 93 a duration of 83 ms
+    instead of 42 came back with one frame duplicated among its leading black
+    frames, and ``align`` reported an offset of +1 against a release it
+    actually matched frame for frame -- with a confidence of 13.45, in two
+    windows that agreed, as ``reliable``. Every verification check would have
+    passed on the misaligned result. An ffmpeg too old to know the flag refuses
+    it outright, which is the right way for this to fail.
+
     Seeking is done by timestamp because ffmpeg has no frame-index seek; the
     frame rate from :class:`~hibrit.probe.VideoInfo` converts between the two.
     """
@@ -227,6 +245,7 @@ def luma_curve(
     args += ["-i", str(info.path), "-map", "0:v:0"]
     if frames is not None:
         args += ["-frames:v", str(frames)]
+    args += ["-fps_mode", "passthrough"]
     args += [
         "-vf",
         f"scale={width}:{height}:flags=bilinear,format=gray",
