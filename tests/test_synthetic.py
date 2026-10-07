@@ -1416,6 +1416,49 @@ class TestVerificationCosts:
         )
 
 
+#: The clip ``TestTheCurveFollowsCodedFrames`` reads: how many frames it is
+#: coded with, and after which one its timestamps skip a slot.
+GAPPED_CODED = 48
+GAPPED_AFTER = 20
+
+
+@pytest.fixture(scope="session")
+def gapped_clip(synthetic_dir: Path, toolbox) -> Path:
+    """A Matroska clip with one empty slot in its timeline."""
+    out = synthetic_dir / "gapped.mkv"
+    toolbox.run(
+        "ffmpeg",
+        [
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=size={WIDTH}x{HEIGHT}:rate={FPS}",
+            "-frames:v",
+            str(GAPPED_CODED),
+            # Every frame from GAPPED_AFTER on is stamped one frame later than
+            # its position, leaving one empty slot in the timeline.
+            "-vf",
+            f"setpts='if(gte(N,{GAPPED_AFTER}),N+1,N)/({FPS}*TB)'",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx265",
+            "-pix_fmt",
+            "yuv420p10le",
+            "-preset",
+            "ultrafast",
+            "-x265-params",
+            "log-level=none",
+            str(out),
+        ],
+    )
+    return out
+
+
 class TestTheCurveFollowsCodedFrames:
     """``align`` has to count in coded frames, because that is how the metadata
     it retimes is indexed: one RPU, one HDR10+ payload per coded frame.
@@ -1434,47 +1477,9 @@ class TestTheCurveFollowsCodedFrames:
     built with.
     """
 
-    CODED = 48
-    GAP_AFTER = 20
-
-    @pytest.fixture(scope="class")
-    def gapped_clip(self, synthetic_dir: Path, toolbox) -> Path:
-        out = synthetic_dir / "gapped.mkv"
-        toolbox.run(
-            "ffmpeg",
-            [
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-f",
-                "lavfi",
-                "-i",
-                f"testsrc2=size={WIDTH}x{HEIGHT}:rate={FPS}",
-                "-frames:v",
-                str(self.CODED),
-                # Every frame from GAP_AFTER on is stamped one frame later than
-                # its position, leaving one empty slot in the timeline.
-                "-vf",
-                f"setpts='if(gte(N,{self.GAP_AFTER}),N+1,N)/({FPS}*TB)'",
-                "-fps_mode",
-                "passthrough",
-                "-c:v",
-                "libx265",
-                "-pix_fmt",
-                "yuv420p10le",
-                "-preset",
-                "ultrafast",
-                "-x265-params",
-                "log-level=none",
-                str(out),
-            ],
-        )
-        return out
-
     def test_one_value_per_coded_frame(self, gapped_clip: Path, toolbox) -> None:
         curve = luma_curve(probe(gapped_clip, toolbox), toolbox)
-        assert len(curve) == self.CODED
+        assert len(curve) == GAPPED_CODED
 
     def test_no_frame_is_invented_to_fill_the_gap(self, gapped_clip: Path, toolbox) -> None:
         """testsrc2 changes every frame, so an exact repeat can only be a
